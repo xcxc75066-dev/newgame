@@ -1,16 +1,23 @@
-/* Amani Market CMS - editor (no external libraries). */
+/* Amani Market CMS — "ليل أخضر" design (no external libraries). */
 'use strict';
 
 (() => {
   const API = '/api/cms';
   const LISTS = { popular: 'الأكثر طلباً', more: 'منتجات أخرى / العروض' };
   const STATUSES = {
-    pending: 'قيد الانتظار',
+    pending: 'جديد',
     confirmed: 'مؤكد',
     processing: 'قيد التجهيز',
-    shipped: 'تم الشحن',
-    delivered: 'تم التوصيل',
+    shipped: 'تشحن',
+    delivered: 'توصل',
     cancelled: 'ملغي'
+  };
+  // The quick button on each order moves it one step forward.
+  const NEXT_STEP = {
+    pending: ['confirmed', 'تأكيد الطلب'],
+    confirmed: ['shipped', 'تشحن'],
+    processing: ['shipped', 'تشحن'],
+    shipped: ['delivered', 'توصل']
   };
   const BADGE_POSITIONS = {
     'top-left': 'أعلى اليسار',
@@ -33,10 +40,80 @@
   };
   const isBestOffer = (product) => saving(product) > BEST_OFFER_MIN_SAVING;
 
-  const BADGE_COLORS = ['#0A3A2A', '#C5A059', '#DC2626', '#111111', '#2563EB'];
+  const BADGE_COLORS = ['#0B4D3B', '#C5A059', '#DC2626', '#111111', '#2563EB'];
   const PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#ebe8e1"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#1D2E28"/>'
+    + '<path d="M10 5h4v2h-4zM9.5 7h5l.7 2v8a1.5 1.5 0 0 1-1.5 1.5h-3.4A1.5 1.5 0 0 1 8.8 17V9z" fill="none" stroke="#3FBF8A" stroke-width=".8"/></svg>'
   );
+
+  // ------------------------------------------------------------------ icons
+  // Constant SVG markup only (never user data).
+  const ICONS = {
+    home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+    box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+    tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    dots: '<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>',
+    bag: '<path d="M6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.9M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    download: '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/>',
+    send: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 3"/>',
+    external: '<path d="M14 3h7v7M21 3 10 14"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+    back: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    forward: '<path d="m15 18-6-6 6-6"/>',
+    close: '<path d="M18 6 6 18M6 6l12 12"/>',
+    camera: '<path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="4"/>',
+    trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    down: '<path d="M12 5v14M19 12l-7 7-7-7"/>',
+    phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+    chat: '<path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+    spark: '<path d="M12 3l1.9 5.8L20 10l-5 3.6L16.8 20 12 16.5 7.2 20 9 13.6 4 10l6.1-1.2z"/>',
+    funnel: '<path d="M3 4h18l-7 8v6l-4 2v-8z"/>',
+    megaphone: '<path d="M3 11v2a2 2 0 0 0 2 2h2l5 4V5L7 9H5a2 2 0 0 0-2 2z"/><path d="M16 8a5 5 0 0 1 0 8"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+    device: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+    city: '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-4h6v4"/>',
+    ruler: '<path d="M3 17 17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    telegram: '<path d="M21 4 3 11l6 2 2 6 3-4 5 4z"/><path d="m9 13 9-6"/>'
+  };
+
+  function icon(name) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'icon');
+    svg.innerHTML = ICONS[name] || '';
+    return svg;
+  }
+
+  function applyIcons(root = document) {
+    root.querySelectorAll('[data-icon]').forEach((el) => {
+      if (el.querySelector(':scope > svg.icon')) return;
+      el.prepend(icon(el.dataset.icon));
+    });
+  }
 
   const state = {
     lists: { popular: [], more: [] },
@@ -45,7 +122,9 @@
     version: '',
     editing: null, // { list, index (null = new), draft }
     dirty: false,
-    orders: { status: '', offset: 0, items: [] },
+    tab: 'home',
+    productFilter: 'all',
+    orders: { status: 'pending', offset: 0, items: [], counts: {} },
     uploadTarget: null
   };
 
@@ -58,6 +137,7 @@
       if (value === undefined || value === null || value === false) continue;
       if (key === 'class') el.className = value;
       else if (key === 'text') el.textContent = value;
+      else if (key === 'icon') el.append(icon(value));
       else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
       else if (key === 'checked' || key === 'value' || key === 'disabled' || key === 'selected') el[key] = value;
       else el.setAttribute(key, value === true ? '' : String(value));
@@ -70,7 +150,24 @@
   }
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
-  const money = (value) => `${Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} DH`;
+  const money = (value) => `${Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }).replace(/,/g, ' ')} DH`;
+
+  // ------------------------------------------------------------------ theme
+  const THEME_KEY = 'amani-cms-theme';
+  function storedTheme() {
+    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch (_) { return 'dark'; }
+  }
+  function applyTheme(theme) {
+    if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'light' ? '#F2F5F3' : '#0F1A16');
+    const label = $('themeLabel');
+    if (label) label.textContent = theme === 'light' ? 'الوضع الليلي' : 'الوضع الفاتح';
+    const holder = $('themeIcon');
+    if (holder) holder.replaceChildren(icon(theme === 'light' ? 'moon' : 'sun'));
+  }
+  applyTheme(storedTheme());
 
   // ------------------------------------------------------------------ toast
   let toastTimer = 0;
@@ -127,6 +224,7 @@
   }
 
   async function boot() {
+    applyIcons();
     try {
       const session = await api('/session');
       if (session.authenticated) await enterApp();
@@ -139,7 +237,7 @@
   async function enterApp() {
     showScreen('app');
     await loadProducts();
-    switchTab('products');
+    switchTab('home');
   }
 
   // ------------------------------------------------------------------ login
@@ -152,7 +250,7 @@
       await api('/login', { method: 'POST', body: { password: $('password').value } });
       $('password').value = '';
       await enterApp();
-      toast('مرحباً بك 👋', 'success');
+      toast('مرحباً بك', 'success');
     } catch (error) {
       $('loginError').textContent = error.message;
       $('password').select();
@@ -163,7 +261,9 @@
 
   $('togglePassword').addEventListener('click', () => {
     const input = $('password');
-    input.type = input.type === 'password' ? 'text' : 'password';
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    $('togglePassword').replaceChildren(icon(show ? 'eyeOff' : 'eye'));
   });
 
   $('logoutBtn').addEventListener('click', async () => {
@@ -171,21 +271,138 @@
     showLogin('تم تسجيل الخروج.');
   });
 
-  // -------------------------------------------------------------------- tabs
+  $('themeToggle').addEventListener('click', () => {
+    const next = storedTheme() === 'light' ? 'dark' : 'light';
+    try { localStorage.setItem(THEME_KEY, next); } catch (_) { /* private mode */ }
+    applyTheme(next);
+  });
+
+  // On admin.<domain>, the "shop" link goes to the main site.
+  const shopBase = () => (location.hostname.startsWith('admin.')
+    ? `${location.protocol}//${location.hostname.slice('admin.'.length)}`
+    : location.origin);
+  $('shopLink').href = `${shopBase()}/`;
+  $('shopLink').querySelector('small').textContent = shopBase().replace(/^https?:\/\//, '');
+
+  // ---------------------------------------------------------------- navigation
+  const VIEWS = ['home', 'orders', 'products', 'stats', 'more', 'categories', 'history'];
   function switchTab(name) {
-    document.querySelectorAll('.tabs button').forEach((button) => {
-      button.classList.toggle('active', button.dataset.tab === name);
-      button.setAttribute('aria-selected', String(button.dataset.tab === name));
+    state.tab = name;
+    const navName = name === 'categories' || name === 'history' ? 'more' : name;
+    document.querySelectorAll('#navTabs button[data-tab]').forEach((button) => {
+      const active = button.dataset.tab === navName;
+      button.classList.toggle('active', active);
+      if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
     });
-    ['products', 'categories', 'orders', 'stats', 'history'].forEach((tab) => { $(`tab-${tab}`).hidden = tab !== name; });
+    VIEWS.forEach((view) => { $(`tab-${view}`).hidden = view !== name; });
+    window.scrollTo({ top: 0 });
+    if (name === 'home') loadHome();
+    if (name === 'orders') loadOrders(true);
+    if (name === 'products') renderProducts();
     if (name === 'categories') renderCategoriesTab();
     if (name === 'stats') loadStats();
-    if (name === 'orders') loadOrders(true);
     if (name === 'history') loadHistory();
   }
-  document.querySelectorAll('.tabs button').forEach((button) => {
+  document.querySelectorAll('#navTabs button[data-tab]').forEach((button) => {
     button.addEventListener('click', () => switchTab(button.dataset.tab));
   });
+  document.addEventListener('click', (event) => {
+    const go = event.target.closest('[data-go]');
+    if (go) switchTab(go.dataset.go);
+  });
+
+  function setPendingBadge(count) {
+    const badge = $('navPending');
+    badge.textContent = String(count || 0);
+    badge.hidden = !count;
+  }
+
+  // -------------------------------------------------------------------- home
+  const WEEKDAYS = ['إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت', 'أحد'];
+
+  function trend(now, before, format = (v) => v) {
+    if (!before && !now) return h('small', { class: 'flat', text: 'بحال البارح' });
+    if (!before) return h('small', { class: 'up', text: `البارح كان ${format(0)}` });
+    const change = Math.round(((now - before) / before) * 100);
+    if (change === 0) return h('small', { class: 'flat', text: 'بحال البارح' });
+    return h('small', { class: change > 0 ? 'up' : 'down', text: `${change > 0 ? 'طلع' : 'نزل'} ${Math.abs(change)}% على البارح` });
+  }
+
+  async function loadHome() {
+    const body = $('homeBody');
+    const hour = new Date().getHours();
+    $('greeting').textContent = hour < 12 ? 'صباح الخير' : hour < 18 ? 'نهارك سعيد' : 'مساء الخير';
+    if (!body.children.length || body.querySelector('.spinner')) body.replaceChildren(h('div', { class: 'spinner' }));
+    try {
+      const d = await api('/dashboard');
+      const pending = d.counts.pending || 0;
+      setPendingBadge(pending);
+      const parts = [];
+
+      parts.push(pending
+        ? h('button', { type: 'button', class: 'hero', onclick: () => { state.orders.status = 'pending'; switchTab('orders'); } },
+          h('span', { class: 'count-tile', text: pending }),
+          h('span', { class: 'grow' }, h('b', { text: pending === 1 ? 'طلب جديد كيتسنى التأكيد' : 'طلبات جداد كيتسناو التأكيد' }), h('small', { text: 'ضغط باش تشوفهم، تعيط ولا تأكد' })),
+          icon('forward'))
+        : h('div', { class: 'hero calm' },
+          h('span', { class: 'count-tile' }, icon('check')),
+          h('span', { class: 'grow' }, h('b', { text: 'ما كاين حتى طلب جديد' }), h('small', { text: 'كلشي مأكد. الطلبات الجداد غادي يبانو هنا.' }))));
+
+      const t = d.today, y = d.yesterday;
+      parts.push(h('div', { class: 'kpis' },
+        h('div', { class: 'kpi' }, h('span', { text: 'زوار اليوم' }), h('strong', { text: t.visitors }), trend(t.visitors, y.visitors)),
+        h('div', { class: 'kpi' }, h('span', { text: 'طلبات اليوم' }), h('strong', { text: t.orders }), trend(t.orders, y.orders)),
+        h('div', { class: 'kpi' }, h('span', { text: 'المداخيل' }), h('strong', { text: money(t.revenue) }), trend(t.revenue, y.revenue, money)),
+        h('div', { class: 'kpi' }, h('span', { text: 'نسبة التحويل' }), h('strong', { text: `${t.conversion}%` }),
+          h('small', { class: t.conversion >= y.conversion ? 'up' : 'down', text: `البارح كان ${y.conversion}%` }))
+      ));
+
+      const max = Math.max(1, ...d.sales.map((s) => s.revenue));
+      const weekTotal = d.sales.reduce((sum, s) => sum + s.revenue, 0);
+      parts.push(h('section', { class: 'box' },
+        h('h2', { class: 'section-title' }, 'المبيعات فـ 7 أيام', h('small', { text: money(weekTotal) })),
+        h('div', { class: 'bars' }, ...d.sales.map((s, i) => {
+          const bar = h('i', { title: `${money(s.revenue)} · ${s.orders} طلب` });
+          bar.style.height = `${Math.max(3, Math.round((s.revenue / max) * 100))}%`;
+          const isToday = i === d.sales.length - 1;
+          return h('div', { class: `bar${isToday ? ' today' : ''}` }, bar, h('span', { text: isToday ? 'اليوم' : WEEKDAYS[s.weekday] }));
+        }))
+      ));
+
+      const alerts = [];
+      const a = d.alerts;
+      a.suspicious.forEach((s) => alerts.push(h('button', { type: 'button', class: 'alert-row', onclick: () => { state.orders.status = ''; switchTab('orders'); } },
+        h('span', { class: 'alert-icon' }, icon('alert')),
+        h('span', { class: 'grow' }, h('b', { text: `رقم طلب ${s.orders} مرات فـ 24 ساعة` }), h('small', { dir: 'ltr', text: s.phone })))));
+      if (a.no_views_7d.length) alerts.push(h('button', { type: 'button', class: 'alert-row', onclick: () => switchTab('products') },
+        h('span', { class: 'alert-icon gold' }, icon('eyeOff')),
+        h('span', { class: 'grow' }, h('b', { text: `${a.no_views_7d.length} منتجات بلا حتى مشاهدة فـ 7 أيام` }), h('small', { text: a.no_views_7d.join(' · ') }))));
+      a.empty_searches.forEach((s) => alerts.push(h('button', { type: 'button', class: 'alert-row', onclick: () => switchTab('stats') },
+        h('span', { class: 'alert-icon gold' }, icon('search')),
+        h('span', { class: 'grow' }, h('b', { text: `قلبو على «${s.query}» وما لقاوهش` }), h('small', { text: `${s.count} مرة · فكرة منتوج جديد؟` })))));
+      if (!a.telegram) alerts.push(h('div', { class: 'alert-row' },
+        h('span', { class: 'alert-icon gold' }, icon('telegram')),
+        h('span', { class: 'grow' }, h('b', { text: 'Telegram ما مربوطش' }), h('small', { text: 'التقارير ديال كل 6 ساعات ما كتوصلكش.' }))));
+      if (!alerts.length) alerts.push(h('div', { class: 'alert-row' },
+        h('span', { class: 'alert-icon calm' }, icon('check')),
+        h('span', { class: 'grow' }, h('b', { text: 'كلشي مزيان' }), h('small', { text: 'ما كاين حتى حاجة خاصها تدخل منك دابا.' }))));
+      parts.push(h('section', { class: 'stack' }, h('h2', { class: 'section-title', text: 'خاصك تشوف' }), ...alerts));
+
+      parts.push(h('section', { class: 'box' },
+        h('h2', { class: 'section-title', text: 'الأكثر مبيعاً اليوم' }),
+        d.top.length
+          ? h('div', { class: 'stack' }, ...d.top.map((r, i) => h('div', { class: 'top-row' },
+            h('span', { class: 'rank', text: i + 1 }),
+            h('span', { class: 'grow' }, h('b', { text: r.product }), h('small', { text: `${r.quantity} مبيعات · ${r.orders} طلب` })),
+            h('strong', { text: money(r.revenue) }))))
+          : h('p', { class: 'hint', text: 'حتى طلب اليوم مازال. غادي يبانو هنا ملي يجيو.' })
+      ));
+      body.replaceChildren(...parts);
+    } catch (error) {
+      body.replaceChildren(h('p', { class: 'empty', text: error.message }));
+    }
+  }
+  $('refreshHome').addEventListener('click', loadHome);
 
   // ---------------------------------------------------------------- products
   async function loadProducts() {
@@ -223,20 +440,35 @@
     );
   }
 
+  const PRODUCT_FILTERS = [
+    ['all', 'الكل'], ['popular', 'الأكثر طلباً'], ['more', 'العروض / أخرى'], ['new', 'جداد'], ['hidden', 'مخفية']
+  ];
+
+  function renderProductChips(all) {
+    const counts = {
+      all: all.length,
+      popular: all.filter((x) => x.list === 'popular').length,
+      more: all.filter((x) => x.list === 'more').length,
+      new: all.filter((x) => isNewProduct(x.product)).length,
+      hidden: all.filter((x) => x.product.hidden).length
+    };
+    $('productChips').replaceChildren(...PRODUCT_FILTERS.map(([key, label]) => h('button', {
+      type: 'button', class: `chip${state.productFilter === key ? ' active' : ''}`, 'aria-pressed': String(state.productFilter === key),
+      onclick: () => { state.productFilter = key; renderProducts(); }
+    }, label, h('span', { class: 'count', text: counts[key] }))));
+  }
+
   function renderProducts() {
     const query = $('productSearch').value.trim().toLowerCase();
-    const filter = $('productFilter').value;
+    const filter = state.productFilter;
     const all = allProducts();
     const hiddenCount = all.filter(({ product }) => product.hidden).length;
-
-    $('productStats').replaceChildren(
-      h('div', { class: 'stat' }, h('b', { text: all.length }), h('span', { text: 'كل المنتجات' })),
-      h('div', { class: 'stat' }, h('b', { text: all.length - hiddenCount }), h('span', { text: 'ظاهرة' })),
-      h('div', { class: 'stat' }, h('b', { text: hiddenCount }), h('span', { text: 'مخفية' }))
-    );
+    $('productStats').textContent = `${all.length} منتج · ${hiddenCount} مخفي`;
+    renderProductChips(all);
 
     const rows = all.filter(({ product, list }) => {
       if (filter === 'hidden' && !product.hidden) return false;
+      if (filter === 'new' && !isNewProduct(product)) return false;
       if ((filter === 'popular' || filter === 'more') && list !== filter) return false;
       if (!query) return true;
       return `${product.title} ${product.brand} ${product.id}`.toLowerCase().includes(query);
@@ -244,51 +476,73 @@
 
     const container = $('productList');
     if (!rows.length) {
-      container.replaceChildren(h('p', { class: 'empty', text: all.length ? 'لا توجد نتائج.' : 'لا توجد منتجات بعد. اضغط «منتج جديد».' }));
+      container.replaceChildren(h('p', { class: 'empty', text: all.length ? 'لا توجد نتائج.' : 'لا توجد منتجات بعد. ضغط «منتج جديد».' }));
       return;
     }
-    container.replaceChildren(...rows.map(renderProductRow));
+    container.replaceChildren(...rows.map(renderProductCard));
   }
 
-  function renderProductRow({ product, list, index }) {
+  function closeMenus(except) {
+    document.querySelectorAll('.menu-pop').forEach((menu) => { if (menu !== except) menu.remove(); });
+  }
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.menu-pop, [data-menu-button]')) closeMenus();
+  });
+
+  function renderProductCard({ product, list, index }) {
     const size = (state.lists[list] || []).length;
-    const optionsCount = (product.colors || []).reduce((sum, group) => sum + (group.options || []).length, 0);
     const open = () => openEditor(list, index);
-    return h('article', { class: `product-row${product.hidden ? ' is-hidden' : ''}` },
-      h('img', { class: 'product-thumb', src: product.image || PLACEHOLDER, alt: '', loading: 'lazy', onclick: open, onerror: (e) => { e.target.src = PLACEHOLDER; } }),
-      h('div', { class: 'product-main' },
-        h('h3', { class: 'product-title', text: product.title, onclick: open }),
-        h('div', { class: 'product-price', dir: 'ltr' }, money(product.price),
-          Number(product.oldPrice) > Number(product.price) ? h('s', { text: money(product.oldPrice) }) : null),
-        h('div', { class: 'tags' },
-          h('span', { class: `tag${list === 'more' ? ' gold' : ''}`, text: LISTS[list] }),
-          product.hidden ? h('span', { class: 'tag grey', text: 'مخفي' }) : null,
-          isNewProduct(product) ? h('span', { class: 'tag new', text: '✨ جديد' }) : null,
-          isBestOffer(product) ? h('span', { class: 'tag offer', text: `🏷 عرض (توفير ${saving(product)} DH)` }) : null,
-          optionsCount ? h('span', { class: 'tag grey', text: `${optionsCount} خيارات` }) : null,
-          ...(product.categories || []).map((id) => state.categories.find((c) => c.id === id))
-            .filter(Boolean).map((c) => h('span', { class: 'tag grey', text: `📁 ${c.title}` }))
-        ),
-        h('div', { class: 'row-actions' },
-          h('button', { class: 'icon-btn', type: 'button', title: 'تعديل', 'aria-label': 'تعديل', onclick: open }, '✏️'),
-          h('button', { class: 'icon-btn', type: 'button', title: product.hidden ? 'إظهار' : 'إخفاء', 'aria-label': product.hidden ? 'إظهار' : 'إخفاء', onclick: () => toggleHidden(list, index) }, product.hidden ? '🙈' : '👁'),
-          h('button', { class: 'icon-btn', type: 'button', title: 'نسخ', 'aria-label': 'نسخ', onclick: () => duplicateProduct(list, index) }, '⧉'),
-          h('button', { class: 'icon-btn', type: 'button', title: 'لأعلى', 'aria-label': 'لأعلى', disabled: index === 0, onclick: () => moveProduct(list, index, -1) }, '↑'),
-          h('button', { class: 'icon-btn', type: 'button', title: 'لأسفل', 'aria-label': 'لأسفل', disabled: index === size - 1, onclick: () => moveProduct(list, index, 1) }, '↓'),
-          h('button', { class: 'icon-btn danger', type: 'button', title: 'حذف', 'aria-label': 'حذف', onclick: () => deleteProduct(list, index) }, '🗑')
-        )
-      )
+    const categories = (product.categories || []).map((id) => state.categories.find((c) => c.id === id)).filter(Boolean);
+    const card = h('article', { class: `product-card${product.hidden ? ' is-hidden' : ''}` });
+    const menuButton = h('button', {
+      class: 'icon-btn small', type: 'button', title: 'المزيد', 'aria-label': 'خيارات أخرى', 'data-menu-button': '', icon: 'dots',
+      onclick: () => {
+        const existing = card.querySelector('.menu-pop');
+        closeMenus();
+        if (existing) return;
+        const menu = h('div', { class: 'menu-pop', role: 'menu' },
+          h('button', { type: 'button', role: 'menuitem', icon: 'edit', onclick: () => { closeMenus(); open(); } }, 'تعديل'),
+          h('button', { type: 'button', role: 'menuitem', icon: 'copy', onclick: () => { closeMenus(); duplicateProduct(list, index); } }, 'نسخ'),
+          h('button', { type: 'button', role: 'menuitem', icon: 'up', disabled: index === 0, onclick: () => { closeMenus(); moveProduct(list, index, -1); } }, 'طلّعو لفوق'),
+          h('button', { type: 'button', role: 'menuitem', icon: 'down', disabled: index === size - 1, onclick: () => { closeMenus(); moveProduct(list, index, 1); } }, 'نزّلو لتحت'),
+          h('button', { type: 'button', role: 'menuitem', class: 'danger', icon: 'trash', onclick: () => { closeMenus(); deleteProduct(list, index); } }, 'حذف')
+        );
+        card.append(menu);
+      }
+    });
+    card.append(
+      h('button', { type: 'button', class: 'product-open', onclick: open, 'aria-label': `تعديل ${product.title}` },
+        h('div', { class: 'product-media' },
+          h('img', { src: product.image || PLACEHOLDER, alt: '', loading: 'lazy', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
+          h('div', { class: 'media-tags' },
+            product.hidden ? h('span', { class: 'mtag hidden-tag', text: 'مخفي' }) : null,
+            isNewProduct(product) ? h('span', { class: 'mtag new', text: 'جديد' }) : null,
+            isBestOffer(product) ? h('span', { class: 'mtag offer', text: `-${saving(product)} DH` }) : null)),
+        h('div', { class: 'product-info' },
+          h('b', { text: product.title }),
+          h('div', { class: 'price-line' },
+            Number(product.oldPrice) > Number(product.price) ? h('s', { text: money(product.oldPrice) }) : null,
+            h('strong', { text: money(product.price) })))),
+      h('div', { class: 'product-bottom' },
+        h('small', { text: categories.length ? categories.map((c) => c.title).join(' · ') : LISTS[list] }),
+        h('div', { class: 'btns' },
+          h('button', {
+            class: 'icon-btn small', type: 'button', icon: product.hidden ? 'eyeOff' : 'eye',
+            title: product.hidden ? 'إظهار فالمتجر' : 'إخفاء من المتجر', 'aria-label': product.hidden ? 'إظهار فالمتجر' : 'إخفاء من المتجر',
+            onclick: () => toggleHidden(list, index)
+          }),
+          menuButton))
     );
+    return card;
   }
 
   $('productSearch').addEventListener('input', renderProducts);
-  $('productFilter').addEventListener('change', renderProducts);
 
   async function toggleHidden(list, index) {
     const lists = clone(state.lists);
     const product = lists[list][index];
     product.hidden = !product.hidden;
-    await saveLists(lists, product.hidden ? 'تم إخفاء المنتج من المتجر' : 'المنتج ظاهر الآن في المتجر');
+    await saveLists(lists, product.hidden ? 'تم إخفاء المنتج من المتجر' : 'المنتج ظاهر دابا فالمتجر');
   }
 
   async function duplicateProduct(list, index) {
@@ -314,7 +568,7 @@
 
   async function deleteProduct(list, index) {
     const product = state.lists[list][index];
-    if (!confirm(`حذف «${product.title}» نهائياً؟\n(يمكنك استرجاعه من «السجل»)`)) return false;
+    if (!confirm(`حذف «${product.title}» نهائياً؟\n(تقدر ترجعو من «السجل»)`)) return false;
     const lists = clone(state.lists);
     lists[list].splice(index, 1);
     return saveLists(lists, 'تم حذف المنتج');
@@ -372,6 +626,7 @@
     renderGroups();
     renderBadges();
     renderCategoryChecks();
+    renderPreview();
     $('editor').hidden = false;
     document.body.style.overflow = 'hidden';
     $('editorForm').scrollTop = 0;
@@ -380,7 +635,7 @@
 
   function closeEditor(force = false) {
     if (!state.editing) return true;
-    if (!force && state.dirty && !confirm('لديك تغييرات غير محفوظة. الخروج بدون حفظ؟')) return false;
+    if (!force && state.dirty && !confirm('عندك تغييرات ما تسجلوش. تخرج بلا حفظ؟')) return false;
     state.editing = null;
     state.dirty = false;
     $('editor').hidden = true;
@@ -389,8 +644,8 @@
   }
 
   const markDirty = () => { state.dirty = true; };
-  $('editorForm').addEventListener('input', markDirty);
-  $('editorForm').addEventListener('change', markDirty);
+  $('editorForm').addEventListener('input', () => { markDirty(); renderPreview(); });
+  $('editorForm').addEventListener('change', () => { markDirty(); renderPreview(); });
   $('editorClose').addEventListener('click', () => closeEditor());
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !$('editor').hidden) closeEditor();
@@ -430,21 +685,46 @@
     const draft = state.editing.draft;
     const percent = discountPercent();
     const save = saving(draft);
-    $('discountHint').textContent = percent
-      ? `تخفيض ${percent}% (توفير ${save} DH)${isBestOffer(draft) ? ' ← يظهر في Best Offers ✓' : ` · Best Offers يحتاج توفير أكثر من ${BEST_OFFER_MIN_SAVING} DH`}`
-      : 'بدون ثمن قديم = بدون تخفيض.';
+    const hint = $('discountHint');
+    hint.className = `note${isBestOffer(draft) ? ' good' : ''}`;
+    hint.textContent = percent
+      ? `تخفيض ${percent}% · توفير ${save} DH${isBestOffer(draft) ? ' ← كيدخل لـ Best Offers' : ` · Best Offers خاصها توفير أكثر من ${BEST_OFFER_MIN_SAVING} DH`}`
+      : 'بلا ثمن قديم = بلا تخفيض.';
     const added = Date.parse(draft.addedAt || '');
     const daysLeft = Number.isFinite(added) ? Math.ceil(NEW_PRODUCT_DAYS - (Date.now() - added) / 86400000) : 0;
-    $('autoSectionsHint').textContent = isNewProduct(draft)
-      ? `✨ يظهر في What's New لمدة ${daysLeft} يوماً أخرى.`
-      : `لا يظهر في What's New (فقط المنتجات المضافة في آخر ${NEW_PRODUCT_DAYS} يوماً).`;
+    const fresh = $('autoSectionsHint');
+    fresh.className = `note${isNewProduct(draft) ? ' fresh' : ''}`;
+    fresh.textContent = isNewProduct(draft)
+      ? `كيبان فـ What's New مازال ${daysLeft} يوم.`
+      : `ما كيبانش فـ What's New (غير المنتجات المزيدة فآخر ${NEW_PRODUCT_DAYS} يوم).`;
+  }
+
+  // Live "how the customer sees it" card at the top of the editor.
+  function renderPreview() {
+    if (!state.editing) return;
+    const draft = state.editing.draft;
+    const percent = discountPercent();
+    const price = Number(draft.price) || 0;
+    const old = Number(draft.oldPrice) || 0;
+    const list = $('f-list').value;
+    $('editorPreview').replaceChildren(
+      h('div', { class: 'pv-img' },
+        h('img', { src: draft.image || PLACEHOLDER, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
+        percent ? h('span', { class: 'pv-badge', text: `-${percent}%` }) : null),
+      h('div', { class: 'grow' },
+        h('small', { text: 'معاينة · كيف كيشوفو الزبون' }),
+        h('b', { text: draft.title || 'اسم المنتوج' }),
+        h('div', { class: 'pv-price' }, old > price ? h('s', { text: money(old) }) : null, h('strong', { text: price ? money(price) : '— DH' })),
+        h('div', { class: 'pv-state', text: draft.hidden ? 'مخفي من المتجر' : `ظاهر · ${LISTS[list]}` }))
+    );
   }
 
   function renderImagePreview() {
     const url = state.editing.draft.image;
     const box = $('imagePreview');
-    if (!url) { box.replaceChildren(h('span', { text: 'لا توجد صورة' })); return; }
+    if (!url) { box.replaceChildren(h('span', { text: 'لا توجد صورة' })); renderPreview(); return; }
     box.replaceChildren(h('img', { src: url, alt: '', onerror: () => box.replaceChildren(h('span', { text: 'تعذر عرض الصورة' })) }));
+    renderPreview();
   }
 
   // Option groups ("colors" in the shop's JSON)
@@ -452,15 +732,15 @@
     const draft = state.editing.draft;
     const container = $('groupsEditor');
     if (!draft.colors.length) {
-      container.replaceChildren(h('p', { class: 'hint', text: 'بدون خيارات. أضف مثلاً «الحجم» إذا كان للمنتج أحجام بأثمنة مختلفة.' }));
+      container.replaceChildren(h('p', { class: 'hint', text: 'بلا خيارات. زيد مثلاً «الحجم» إلا كان عندو أحجام بأثمنة مختلفة.' }));
       return;
     }
     container.replaceChildren(...draft.colors.map((group, gi) => h('div', { class: 'group-box' },
       h('div', { class: 'group-head' },
         h('input', { value: group.name, dir: 'auto', placeholder: 'اسم المجموعة (مثال: Size)', 'aria-label': 'اسم المجموعة', maxlength: 40,
           oninput: (e) => { group.name = e.target.value; } }),
-        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف المجموعة', title: 'حذف المجموعة',
-          onclick: () => { draft.colors.splice(gi, 1); markDirty(); renderGroups(); } }, '🗑')
+        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف المجموعة', title: 'حذف المجموعة', icon: 'trash',
+          onclick: () => { draft.colors.splice(gi, 1); markDirty(); renderGroups(); } })
       ),
       ...group.options.map((option, oi) => h('div', { class: 'option-row' },
         h('input', { value: option.name, dir: 'auto', placeholder: 'الخيار (مثال: 50 ml)', 'aria-label': 'اسم الخيار', maxlength: 60,
@@ -468,8 +748,8 @@
         h('input', { value: option.priceAdd ? String(option.priceAdd) : '', placeholder: '+0 DH', inputmode: 'decimal', dir: 'ltr',
           'aria-label': 'زيادة الثمن', title: 'زيادة على الثمن الأساسي (درهم)',
           oninput: (e) => { option.priceAdd = Number(e.target.value.replace(',', '.')) || 0; } }),
-        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف الخيار', title: 'حذف الخيار', disabled: group.options.length === 1,
-          onclick: () => { group.options.splice(oi, 1); markDirty(); renderGroups(); } }, '✕'),
+        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف الخيار', title: 'حذف الخيار', icon: 'close', disabled: group.options.length === 1,
+          onclick: () => { group.options.splice(oi, 1); markDirty(); renderGroups(); } }),
         h('div', { class: 'option-extra' },
           h('label', { class: 'mini-check' },
             h('input', { type: 'checkbox', checked: !!option.soldOut, onchange: (e) => { option.soldOut = e.target.checked; } }),
@@ -477,12 +757,12 @@
           h('img', { src: option.img || PLACEHOLDER, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
           h('input', { value: option.img || '', placeholder: 'صورة الخيار (اختياري)', dir: 'ltr', 'aria-label': 'رابط صورة الخيار',
             oninput: (e) => { option.img = e.target.value.trim(); } }),
-          h('button', { class: 'icon-btn', type: 'button', title: 'رفع صورة للخيار', 'aria-label': 'رفع صورة للخيار',
-            onclick: () => pickImage((url) => { option.img = url; markDirty(); renderGroups(); }) }, '📷')
+          h('button', { class: 'icon-btn', type: 'button', title: 'رفع صورة للخيار', 'aria-label': 'رفع صورة للخيار', icon: 'camera',
+            onclick: () => pickImage((url) => { option.img = url; markDirty(); renderGroups(); }) })
         )
       )),
-      h('button', { class: 'btn ghost small add-option', type: 'button',
-        onclick: () => { group.options.push({ name: '', img: '', soldOut: false, priceAdd: 0 }); markDirty(); renderGroups(); } }, '＋ إضافة خيار')
+      h('button', { class: 'btn ghost small', type: 'button', icon: 'plus',
+        onclick: () => { group.options.push({ name: '', img: '', soldOut: false, priceAdd: 0 }); markDirty(); renderGroups(); } }, 'زيد خيار')
     )));
   }
 
@@ -501,7 +781,7 @@
     const draft = state.editing.draft;
     const container = $('badgesEditor');
     if (!draft.badges.length) {
-      container.replaceChildren(h('p', { class: 'hint', text: 'بدون شارات.' }));
+      container.replaceChildren(h('p', { class: 'hint', text: 'بلا شارات.' }));
       return;
     }
     container.replaceChildren(...draft.badges.map((badge, bi) => {
@@ -513,8 +793,8 @@
           oninput: (e) => { badge.label = e.target.value; preview.textContent = e.target.value || 'BADGE'; } }),
         h('select', { 'aria-label': 'مكان الشارة', onchange: (e) => { badge.position = e.target.value; } },
           ...Object.entries(BADGE_POSITIONS).map(([value, label]) => h('option', { value, selected: badge.position === value, text: label }))),
-        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف الشارة',
-          onclick: () => { draft.badges.splice(bi, 1); markDirty(); renderBadges(); } }, '🗑'),
+        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف الشارة', icon: 'trash',
+          onclick: () => { draft.badges.splice(bi, 1); markDirty(); renderBadges(); } }),
         h('div', { class: 'swatches' },
           ...BADGE_COLORS.map((color) => {
             const swatch = h('button', { type: 'button', class: `swatch${badge.background.toUpperCase() === color ? ' active' : ''}`,
@@ -535,10 +815,10 @@
       if (draft.badges.length >= 4) return toast('الحد الأقصى 4 شارات.', 'error');
       const kind = button.dataset.presetBadge;
       const percent = discountPercent();
-      if (kind === 'discount' && !percent) return toast('أدخل الثمن القديم أولاً لحساب التخفيض.', 'error');
+      if (kind === 'discount' && !percent) return toast('دخّل الثمن القديم أولاً باش نحسبو التخفيض.', 'error');
       const presets = {
         new: { label: 'NEW', position: 'top-left', background: '#C5A059', textColor: '#111111' },
-        best: { label: 'BEST SELLER', position: 'top-right', background: '#0A3A2A', textColor: '#FFFFFF' },
+        best: { label: 'BEST SELLER', position: 'top-right', background: '#0B4D3B', textColor: '#FFFFFF' },
         discount: { label: `-${percent}%`, position: 'top-left', background: '#DC2626', textColor: '#FFFFFF' },
         custom: { label: '', position: 'bottom-right', background: '#111111', textColor: '#FFFFFF' }
       };
@@ -553,7 +833,7 @@
     draft.categories = draft.categories || [];
     const box = $('categoryChecks');
     if (!state.categories.length) {
-      box.replaceChildren(h('p', { class: 'hint', text: 'لا توجد تصنيفات بعد. أضفها من خانة «التصنيفات».' }));
+      box.replaceChildren(h('p', { class: 'hint', text: 'مازال ما كاين حتى تصنيف. زيدهم من «المزيد ← التصنيفات».' }));
       return;
     }
     box.replaceChildren(...state.categories.map((category) => h('label', { class: 'check-pill' },
@@ -574,17 +854,17 @@
     if (!draft.title.trim()) problems.push('اسم المنتج مطلوب');
     const price = Number(draft.price);
     mark('f-price', !(price > 0));
-    if (!(price > 0)) problems.push('الثمن مطلوب ويجب أن يكون أكبر من 0');
+    if (!(price > 0)) problems.push('الثمن مطلوب وخاصو يكون أكبر من 0');
     const old = draft.oldPrice === '' ? 0 : Number(draft.oldPrice);
     mark('f-oldPrice', Number.isNaN(old) || old < 0);
-    if (Number.isNaN(old) || old < 0) problems.push('الثمن القديم غير صالح');
+    if (Number.isNaN(old) || old < 0) problems.push('الثمن القديم ماشي صحيح');
     mark('f-image', !draft.image);
-    if (!draft.image) problems.push('أضف صورة للمنتج');
+    if (!draft.image) problems.push('زيد صورة للمنتوج');
     draft.colors.forEach((group) => {
-      if (!group.name.trim()) problems.push('كل مجموعة خيارات تحتاج اسماً');
-      if (group.options.some((o) => !o.name.trim())) problems.push(`كل خيار في «${group.name || 'المجموعة'}» يحتاج اسماً`);
+      if (!group.name.trim()) problems.push('كل مجموعة خيارات خاصها سمية');
+      if (group.options.some((o) => !o.name.trim())) problems.push(`كل خيار فـ «${group.name || 'المجموعة'}» خاصو سمية`);
     });
-    draft.badges.forEach((badge) => { if (!badge.label.trim()) problems.push('كل شارة تحتاج نصاً'); });
+    draft.badges.forEach((badge) => { if (!badge.label.trim()) problems.push('كل شارة خاصها نص'); });
     return problems;
   }
 
@@ -610,7 +890,7 @@
     }
     const button = $('editorSave');
     button.disabled = true;
-    const saved = await saveLists(lists, product.hidden ? 'تم الحفظ (المنتج مخفي)' : 'تم الحفظ ✓ التغيير ظاهر في المتجر');
+    const saved = await saveLists(lists, product.hidden ? 'تم الحفظ (المنتج مخفي)' : 'تم الحفظ ✓ التغيير ظاهر فالمتجر');
     button.disabled = false;
     if (saved) closeEditor(true);
   });
@@ -661,7 +941,7 @@
       source = await new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('هذا الملف ليس صورة.'));
+        img.onerror = () => reject(new Error('هاد الملف ماشي صورة.'));
         img.src = URL.createObjectURL(file);
       });
     }
@@ -680,24 +960,40 @@
   }
 
   // ------------------------------------------------------------------ orders
-  const orderFilter = $('orderFilter');
-  Object.entries(STATUSES).forEach(([value, label]) => orderFilter.append(h('option', { value, text: label })));
-  orderFilter.addEventListener('change', () => loadOrders(true));
+  const STAGES = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', ''];
   $('refreshOrders').addEventListener('click', () => loadOrders(true));
   $('moreOrders').addEventListener('click', () => loadOrders(false));
 
+  function renderStages() {
+    const counts = state.orders.counts || {};
+    const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    $('orderStages').replaceChildren(...STAGES.map((stage) => {
+      const active = state.orders.status === stage;
+      return h('button', {
+        type: 'button', class: `chip${active ? ' active' : ''}`, 'aria-pressed': String(active),
+        onclick: () => { state.orders.status = stage; loadOrders(true); }
+      }, stage ? STATUSES[stage] : 'الكل', h('span', { class: 'count', text: stage ? (counts[stage] || 0) : total }));
+    }));
+  }
+
   async function loadOrders(reset) {
     const pageSize = 30;
-    if (reset) state.orders = { status: orderFilter.value, offset: 0, items: [] };
+    if (reset) state.orders = { ...state.orders, offset: 0, items: [] };
     const params = new URLSearchParams({ limit: String(pageSize), offset: String(state.orders.offset) });
     if (state.orders.status) params.set('status', state.orders.status);
+    renderStages();
+    if (reset) $('orderList').replaceChildren(h('div', { class: 'spinner' }));
     try {
       const data = await api(`/orders?${params}`);
       state.orders.items.push(...data.orders);
       state.orders.offset += data.orders.length;
+      state.orders.counts = data.counts || {};
+      setPendingBadge(state.orders.counts.pending || 0);
       $('moreOrders').hidden = data.orders.length < pageSize;
+      renderStages();
       renderOrders();
     } catch (error) {
+      $('orderList').replaceChildren();
       toast(error.message, 'error');
     }
   }
@@ -709,53 +1005,99 @@
     return digits;
   }
 
+  function phoneKey(phone) {
+    let digits = String(phone || '').replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.startsWith('212')) digits = `0${digits.slice(3)}`;
+    return digits;
+  }
+
+  function ago(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+    if (minutes < 1) return 'دابا';
+    if (minutes < 60) return `قبل ${minutes} دقيقة`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `قبل ${hours} ساعة`;
+    return date.toLocaleString('ar-MA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function whatsappMessage(order) {
+    const items = order.items.map((item) => {
+      const variants = (item.variants || []).map((v) => v.option).filter(Boolean).join(' · ');
+      return `- ${item.quantity} × ${item.title}${variants ? ` (${variants})` : ''}`;
+    }).join('\n');
+    return `السلام عليكم ${order.customer.name}، معاك Amani Market.\n`
+      + `بغينا نأكدو معاك الطلب ديالك رقم ${order.order_number}:\n${items}\n`
+      + `المجموع: ${money(order.total)} (الدفع عند الاستلام).\n`
+      + `واش نصيفطوه ليك لـ: ${order.customer.address}؟ شكراً`;
+  }
+
+  async function changeStatus(order, status) {
+    const previous = order.status;
+    try {
+      const data = await api(`/orders/${encodeURIComponent(order.order_id)}`, { method: 'PATCH', body: { status } });
+      Object.assign(order, data.order);
+      const counts = state.orders.counts;
+      counts[previous] = Math.max(0, (counts[previous] || 0) - 1);
+      counts[order.status] = (counts[order.status] || 0) + 1;
+      setPendingBadge(counts.pending || 0);
+      if (state.orders.status && state.orders.status !== order.status) {
+        state.orders.items = state.orders.items.filter((o) => o !== order);
+      }
+      renderStages();
+      renderOrders();
+      toast(`الحالة: ${STATUSES[order.status]}`, 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+      renderOrders();
+    }
+  }
+
   function renderOrders() {
     const container = $('orderList');
     if (!state.orders.items.length) {
-      container.replaceChildren(h('p', { class: 'empty', text: 'لا توجد طلبات.' }));
+      container.replaceChildren(h('div', { class: 'empty' }, icon('check'),
+        h('p', { text: state.orders.status === 'pending' ? 'ما بقا حتى طلب جديد. مزيان!' : 'ما كاين حتى طلب هنا.' })));
       return;
     }
+    // Same phone ordering again within 24 hours = worth a check before shipping.
+    const byPhone = {};
+    state.orders.items.forEach((order) => {
+      const key = phoneKey(order.customer.phone);
+      (byPhone[key] = byPhone[key] || []).push(new Date(order.created_at).getTime());
+    });
     container.replaceChildren(...state.orders.items.map((order) => {
-      const select = h('select', { class: `status-${order.status}`, 'aria-label': 'حالة الطلب' },
-        ...Object.entries(STATUSES).map(([value, label]) => h('option', { value, selected: order.status === value, text: label })));
-      select.addEventListener('change', async () => {
-        const previous = order.status;
-        try {
-          const data = await api(`/orders/${encodeURIComponent(order.order_id)}`, { method: 'PATCH', body: { status: select.value } });
-          Object.assign(order, data.order);
-          select.className = `status-${order.status}`;
-          toast(`الحالة: ${STATUSES[order.status]}`, 'success');
-        } catch (error) {
-          select.value = previous;
-          toast(error.message, 'error');
-        }
-      });
-      const date = new Date(order.created_at);
+      const times = (byPhone[phoneKey(order.customer.phone)] || []).sort();
+      const sameDay = times.filter((t) => Math.abs(t - new Date(order.created_at).getTime()) <= 86400000).length;
+      const suspicious = sameDay >= 2;
+      const next = NEXT_STEP[order.status];
       const wa = whatsappNumber(order.customer.phone);
-      return h('article', { class: 'order-card' },
-        h('div', { class: 'order-head' },
+      const select = h('select', { 'aria-label': 'بدّل الحالة' },
+        ...Object.entries(STATUSES).map(([value, label]) => h('option', { value, selected: order.status === value, text: label })));
+      select.addEventListener('change', () => changeStatus(order, select.value));
+      return h('article', { class: `order-card${suspicious ? ' suspicious' : ''}` },
+        suspicious ? h('div', { class: 'order-flag' }, icon('alert'), `نفس الرقم طلب ${sameDay} مرات فـ 24 ساعة`) : null,
+        h('div', { class: 'order-top' },
           h('div', {},
-            h('div', { class: 'order-number', text: order.order_number }),
-            h('div', { class: 'order-date', text: Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ar-MA', { dateStyle: 'medium', timeStyle: 'short' }) })
-          ),
-          select
-        ),
-        h('div', { class: 'order-customer', text: order.customer.name }),
-        h('div', { class: 'hint', text: order.customer.address }),
-        h('div', { class: 'order-contact' },
-          h('a', { class: 'btn ghost small', href: `tel:${order.customer.phone.replace(/[^0-9+]/g, '')}` }, `📞 ${order.customer.phone}`),
-          wa ? h('a', { class: 'btn ghost small', href: `https://wa.me/${wa}`, target: '_blank', rel: 'noopener' }, '💬 WhatsApp') : null
-        ),
-        h('ul', { class: 'order-items' },
-          ...order.items.map((item) => {
-            const variants = (item.variants || []).map((v) => v.option).filter(Boolean).join(' · ');
-            return h('li', {},
-              h('span', { text: `${item.quantity} × ${item.title}${variants ? ` (${variants})` : ''}` }),
-              h('span', { dir: 'ltr', text: money(item.line_total) })
-            );
-          })
-        ),
-        h('div', { class: 'order-total' }, h('span', { text: 'المجموع' }), h('span', { dir: 'ltr', text: money(order.total) }))
+            h('b', { text: order.customer.name }),
+            h('small', { text: `${order.order_number} · ${ago(order.created_at)}` })),
+          h('div', {},
+            h('div', { class: 'order-total', text: money(order.total) }),
+            h('span', { class: `status-pill st-${order.status}`, text: STATUSES[order.status] }))),
+        h('ul', { class: 'order-items' }, ...order.items.map((item) => {
+          const variants = (item.variants || []).map((v) => v.option).filter(Boolean).join(' · ');
+          return h('li', {},
+            h('span', { text: `${item.quantity} × ${item.title}${variants ? ` (${variants})` : ''}` }),
+            h('span', { text: money(item.line_total) }));
+        })),
+        h('div', { class: 'order-address' }, icon('pin'), h('span', { text: order.customer.address })),
+        h('div', { class: 'order-actions' },
+          next ? h('button', { type: 'button', class: 'btn primary', icon: 'check', onclick: () => changeStatus(order, next[0]) }, next[1]) : null,
+          h('a', { class: 'icon-btn', href: `tel:${order.customer.phone.replace(/[^0-9+]/g, '')}`, 'aria-label': `عيط لـ ${order.customer.phone}`, title: order.customer.phone, icon: 'phone' }),
+          wa ? h('a', { class: 'icon-btn wa', href: `https://wa.me/${wa}?text=${encodeURIComponent(whatsappMessage(order))}`, target: '_blank', rel: 'noopener', 'aria-label': 'رسالة WhatsApp جاهزة', title: 'رسالة WhatsApp جاهزة', icon: 'chat' }) : null,
+          select)
       );
     }));
   }
@@ -766,7 +1108,7 @@
     try {
       const data = await api('/history');
       if (!data.items.length) {
-        container.replaceChildren(h('p', { class: 'empty', text: 'لا يوجد سجل بعد. يبدأ مع أول حفظ.' }));
+        container.replaceChildren(h('p', { class: 'empty', text: 'السجل خاوي. كيبدا مع أول حفظ.' }));
         return;
       }
       container.replaceChildren(...data.items.map((item) => {
@@ -774,9 +1116,9 @@
         return h('div', { class: 'history-item' },
           h('div', {},
             h('strong', { text: Number.isNaN(date.getTime()) ? item.name : date.toLocaleString('ar-MA', { dateStyle: 'medium', timeStyle: 'short' }) }),
-            h('small', { text: `${item.count} منتج · النسخة قبل هذا الحفظ` })
+            h('small', { text: `${item.count} منتج · النسخة اللي كانت قبل هاد الحفظ` })
           ),
-          h('button', { class: 'btn ghost small', type: 'button', onclick: () => restore(item) }, 'استرجاع')
+          h('button', { class: 'btn ghost small', type: 'button', icon: 'history', onclick: () => restore(item) }, 'رجّع')
         );
       }));
     } catch (error) {
@@ -785,7 +1127,7 @@
   }
 
   async function restore(item) {
-    if (!confirm('الرجوع لهذه النسخة؟ سيتم حفظ النسخة الحالية في السجل أيضاً.')) return;
+    if (!confirm('ترجع لهاد النسخة؟ النسخة الحالية حتى هي غادي تتحفظ فالسجل.')) return;
     try {
       const data = await api('/history/restore', { method: 'POST', body: { name: item.name, version: state.version } });
       state.lists = data.lists;
@@ -804,10 +1146,6 @@
   $('addProductBtn').addEventListener('click', () => openEditor('popular', null));
 
   // -------------------------------------------------------------- categories
-  const shopBase = () => (location.hostname.startsWith('admin.')
-    ? `${location.protocol}//${location.hostname.slice('admin.'.length)}`
-    : location.origin);
-
   function productsIn(categoryId) {
     return allProducts().filter(({ product }) => (product.categories || []).includes(categoryId));
   }
@@ -820,7 +1158,7 @@
     const container = $('categoryList');
     if (!container) return;
     if (!state.categories.length) {
-      container.replaceChildren(h('p', { class: 'empty', text: 'لا توجد تصنيفات. اضغط «تصنيف جديد».' }));
+      container.replaceChildren(h('p', { class: 'empty', text: 'ما كاين حتى تصنيف. ضغط «تصنيف جديد».' }));
       return;
     }
     container.replaceChildren(...state.categories.map((category, index) => {
@@ -838,38 +1176,38 @@
             h('strong', { text: category.title }),
             h('div', { class: 'hint', text: `${count} منتج${category.hidden ? ' · مخفي من المنيو' : ''}` })
           ),
-          h('a', { href: `${shopBase()}/c/${encodeURIComponent(category.id)}`, target: '_blank', rel: 'noopener', text: 'عرض الصفحة ↗' })
+          h('a', { href: `${shopBase()}/c/${encodeURIComponent(category.id)}`, target: '_blank', rel: 'noopener', icon: 'external' }, 'عرض الصفحة')
         ),
         h('div', { class: 'row-actions' },
-          h('button', { class: 'btn secondary small', type: 'button', onclick: () => openCategorySheet(category.id) }, '📦 اختيار المنتجات'),
-          h('button', { class: 'icon-btn', type: 'button', title: 'تغيير الاسم', 'aria-label': 'تغيير الاسم', onclick: () => {
-            const title = (prompt('الاسم الجديد للتصنيف:', category.title) || '').trim();
+          h('button', { class: 'btn secondary small', type: 'button', icon: 'box', onclick: () => openCategorySheet(category.id) }, 'اختار المنتجات'),
+          h('button', { class: 'icon-btn', type: 'button', title: 'بدّل السمية', 'aria-label': 'بدّل السمية', icon: 'edit', onclick: () => {
+            const title = (prompt('السمية الجديدة ديال التصنيف:', category.title) || '').trim();
             if (!title || title === category.title) return;
             const next = clone(state.categories);
             next[index].title = title;
-            saveCategories(next, 'تم تغيير الاسم');
-          } }, '✏️'),
-          h('button', { class: 'icon-btn', type: 'button', title: category.hidden ? 'إظهار' : 'إخفاء', 'aria-label': category.hidden ? 'إظهار' : 'إخفاء', onclick: () => {
+            saveCategories(next, 'تبدلات السمية');
+          } }),
+          h('button', { class: 'icon-btn', type: 'button', title: category.hidden ? 'إظهار' : 'إخفاء', 'aria-label': category.hidden ? 'إظهار' : 'إخفاء', icon: category.hidden ? 'eyeOff' : 'eye', onclick: () => {
             const next = clone(state.categories);
             next[index].hidden = !next[index].hidden;
             saveCategories(next, next[index].hidden ? 'التصنيف مخفي من المنيو' : 'التصنيف ظاهر فالمنيو');
-          } }, category.hidden ? '🙈' : '👁'),
-          h('button', { class: 'icon-btn', type: 'button', title: 'لأعلى', 'aria-label': 'لأعلى', disabled: index === 0, onclick: () => move(-1) }, '↑'),
-          h('button', { class: 'icon-btn', type: 'button', title: 'لأسفل', 'aria-label': 'لأسفل', disabled: index === state.categories.length - 1, onclick: () => move(1) }, '↓'),
-          h('button', { class: 'icon-btn danger', type: 'button', title: 'حذف', 'aria-label': 'حذف', onclick: () => {
-            if (!confirm(`حذف التصنيف «${category.title}»؟\nالمنتجات ما غاديش يتمسحو، غير كيتحيدو من هاد التصنيف.`)) return;
-            saveCategories(state.categories.filter((c) => c.id !== category.id), 'تم حذف التصنيف');
-          } }, '🗑')
+          } }),
+          h('button', { class: 'icon-btn', type: 'button', title: 'لفوق', 'aria-label': 'لفوق', icon: 'up', disabled: index === 0, onclick: () => move(-1) }),
+          h('button', { class: 'icon-btn', type: 'button', title: 'لتحت', 'aria-label': 'لتحت', icon: 'down', disabled: index === state.categories.length - 1, onclick: () => move(1) }),
+          h('button', { class: 'icon-btn danger', type: 'button', title: 'حذف', 'aria-label': 'حذف', icon: 'trash', onclick: () => {
+            if (!confirm(`نحيدو التصنيف «${category.title}»؟\nالمنتجات ما غاديش يتمسحو، غير كيخرجو من هاد التصنيف.`)) return;
+            saveCategories(state.categories.filter((c) => c.id !== category.id), 'تحيد التصنيف');
+          } })
         )
       );
     }));
   }
 
   $('addCategoryBtn').addEventListener('click', async () => {
-    const title = (prompt('اسم التصنيف الجديد (مثال: المحفظات):') || '').trim();
+    const title = (prompt('سمية التصنيف الجديد (مثال: المحفظات):') || '').trim();
     if (!title) return;
     const next = [...clone(state.categories), { id: '', title, hidden: false }];
-    if (await saveCategories(next, 'تم إنشاء التصنيف ✓ دابا اختار المنتجات ديالو')) {
+    if (await saveCategories(next, 'تصاوب التصنيف ✓ دابا اختار المنتجات ديالو')) {
       const created = state.categories.find((c) => c.title === title);
       if (created) openCategorySheet(created.id);
     }
@@ -918,7 +1256,7 @@
       product.categories = [...current];
     }));
     $('catSheetSave').disabled = true;
-    const saved = await saveLists(lists, 'تم حفظ منتجات التصنيف ✓');
+    const saved = await saveLists(lists, 'تسجلو المنتجات ديال التصنيف ✓');
     $('catSheetSave').disabled = false;
     if (saved) closeCategorySheet();
   });
@@ -940,8 +1278,8 @@
     ));
   }
 
-  function card(title, ...children) {
-    return h('section', { class: 'stats-card' }, h('h3', { text: title }), ...children);
+  function card(iconName, title, ...children) {
+    return h('section', { class: 'stats-card' }, h('h3', {}, icon(iconName), title), ...children);
   }
 
   async function loadStats() {
@@ -952,38 +1290,38 @@
       const o = data.overview;
       const f = o.funnel;
       const parts = [];
-      if (!data.telegram) parts.push(h('div', { class: 'alert', text: '⚠️ Telegram ما زال ما مربوطش: التقارير الأوتوماتيكية ما غاديش توصلك حتى تشغّل set_telegram.py.' }));
+      if (!data.telegram) parts.push(h('div', { class: 'alert' }, icon('telegram'), 'Telegram ما زال ما مربوطش: التقارير الأوتوماتيكية ما غاديش توصلك حتى تشغّل set_telegram.py.'));
       parts.push(h('div', { class: 'stats-grid' },
         ...[['زوار', f.visitors], ['فتحو منتوج', f.viewers], ['زادو للسلة', f.cart], ['طلبات', f.valid_orders],
           ['المداخيل', money(o.revenue)], ['متوسط الطلب', money(o.average_order)], ['نسبة التحويل', f.conversion], ['نسبة الإلغاء (30 يوم)', o.cancel_rate_30d]]
           .map(([label, value]) => h('div', { class: 'stat' }, h('b', { dir: 'ltr', text: value }), h('span', { text: label })))
       ));
-      parts.push(card('🛒 القمع: فين كيتوقف الزبون',
+      parts.push(card('funnel', 'القمع: فين كيتوقف الزبون',
         ...[['زاروا الموقع', f.visitors], ['فتحو منتوج', f.viewers], ['زادو للسلة', f.cart], ['بداو الفورم', f.checkout], ['أكدو الطلب', f.valid_orders]]
           .map(([label, value]) => {
             const bar = h('span');
             bar.style.width = f.visitors ? `${Math.max(2, (100 * value) / f.visitors)}%` : '0%';
             return h('div', { class: 'funnel-row' }, h('span', { text: label }), h('div', { class: 'funnel-bar' }, bar), h('b', { text: `${value} · ${pct(value, f.visitors)}` }));
           }),
-        f.checkout > f.valid_orders ? h('p', { class: 'hint', text: `🛑 ${f.checkout - f.valid_orders} بداو الفورم وما كملوش الطلب.` }) : null
+        f.checkout > f.valid_orders ? h('p', { class: 'hint', text: `${f.checkout - f.valid_orders} بداو الفورم وما كملوش الطلب.` }) : null
       ));
       const products = data.products.filter((r) => r.views || r.orders).slice(0, 20);
-      parts.push(card('🛍️ المنتجات', products.length
+      parts.push(card('tag', 'المنتجات', products.length
         ? table(['المنتوج', 'مشاهدات', 'أشخاص', 'رجعو', 'خرجو بلا سلة', 'للسلة', 'طلبات', 'مداخيل'],
           products.map((r) => [r.product, r.views, r.unique, r.returning, r.left, r.cart, r.orders, money(r.revenue)]))
-        : h('p', { class: 'hint', text: 'لا توجد مشاهدات فهاد المدة.' })));
-      if (o.sources.length) parts.push(card('📣 منين جاو الزوار', table(['المصدر', 'زوار', 'طلبات'], o.sources.map((x) => [x.label, x.visitors, x.orders]))));
-      if (o.campaigns.length) parts.push(card('🎯 الإعلانات (utm_campaign)', table(['الحملة', 'زوار', 'طلبات'], o.campaigns.map((x) => [x.campaign, x.visitors, x.orders]))));
+        : h('p', { class: 'hint', text: 'ما كاين حتى مشاهدة فهاد المدة.' })));
+      if (o.sources.length) parts.push(card('megaphone', 'منين جاو الزوار', table(['المصدر', 'زوار', 'طلبات'], o.sources.map((x) => [x.label, x.visitors, x.orders]))));
+      if (o.campaigns.length) parts.push(card('target', 'الإعلانات (utm_campaign)', table(['الحملة', 'زوار', 'طلبات'], o.campaigns.map((x) => [x.campaign, x.visitors, x.orders]))));
       const pills = (items, render) => h('div', { class: 'kv' }, ...items.map((x) => h('span', { text: render(x) })));
-      if (o.devices.length) parts.push(card('📱 الأجهزة', pills(o.devices, (x) => `${x.label}: ${x.visitors}`)));
-      if (o.cities.length) parts.push(card('🏙️ المدن (من الطلبات)', pills(o.cities, (x) => `${x.city}: ${x.orders}`)));
-      if (o.variants.length) parts.push(card('📏 الأحجام / الخيارات المطلوبة', pills(o.variants, (x) => `${x.option}: ×${x.quantity}`)));
-      if (o.statuses_30d.length) parts.push(card('📦 حالة الطلبات (آخر 30 يوم)', pills(o.statuses_30d, (x) => `${x.label}: ${x.orders}`),
-        h('p', { class: 'hint', text: `🔁 زبناء عاودو الشرا فهاد المدة: ${o.repeat_customers}` })));
-      if (o.suspicious.length) parts.push(card('⚠️ طلبات مشكوك فيها (نفس الرقم بزاف)', pills(o.suspicious, (x) => `${x.phone}: ${x.orders} طلبات`)));
-      if (o.searches.length) parts.push(card('🔍 البحث', pills(o.searches, (x) => `${x.query} (${x.count})`),
-        o.empty_searches.length ? h('p', { class: 'hint', text: `❓ ما لقاوش: ${o.empty_searches.map((x) => x.query).join(' · ')}` }) : null));
-      if (o.visit_hours.length || o.order_hours.length) parts.push(card('⏰ أحسن الساعات',
+      if (o.devices.length) parts.push(card('device', 'الأجهزة', pills(o.devices, (x) => `${x.label.replace(/^\S+\s/, '')}: ${x.visitors}`)));
+      if (o.cities.length) parts.push(card('city', 'المدن (من الطلبات)', pills(o.cities, (x) => `${x.city}: ${x.orders}`)));
+      if (o.variants.length) parts.push(card('ruler', 'الأحجام والخيارات المطلوبة', pills(o.variants, (x) => `${x.option}: ×${x.quantity}`)));
+      if (o.statuses_30d.length) parts.push(card('box', 'حالة الطلبات (آخر 30 يوم)', pills(o.statuses_30d, (x) => `${x.label}: ${x.orders}`),
+        h('p', { class: 'hint', text: `زبناء عاودو الشرا فهاد المدة: ${o.repeat_customers}` })));
+      if (o.suspicious.length) parts.push(card('alert', 'طلبات مشكوك فيها (نفس الرقم بزاف)', pills(o.suspicious, (x) => `${x.phone}: ${x.orders} طلبات`)));
+      if (o.searches.length) parts.push(card('search', 'البحث', pills(o.searches, (x) => `${x.query} (${x.count})`),
+        o.empty_searches.length ? h('p', { class: 'hint', text: `ما لقاوش: ${o.empty_searches.map((x) => x.query).join(' · ')}` }) : null));
+      if (o.visit_hours.length || o.order_hours.length) parts.push(card('clock', 'أحسن الساعات',
         h('p', { class: 'hint', text: `زيارات: ${o.visit_hours.map((x) => hourLabel(x.hour)).join(' · ') || '—'}` }),
         h('p', { class: 'hint', text: `طلبات: ${o.order_hours.map((x) => hourLabel(x.hour)).join(' · ') || '—'}` })));
       body.replaceChildren(...parts);
@@ -1012,7 +1350,7 @@
       $(id).disabled = true;
       try {
         await api('/report/send', { method: 'POST', body: { kind } });
-        toast('تم إرسال التقرير لـ Telegram ✓', 'success');
+        toast('تصيفط التقرير لـ Telegram ✓', 'success');
       } catch (error) {
         toast(error.message, 'error');
       } finally {
@@ -1020,12 +1358,6 @@
       }
     });
   });
-
-  // On admin.<domain>, the "shop" button goes to the main site.
-  if (location.hostname.startsWith('admin.')) {
-    const shopLink = document.querySelector('.topbar-actions a');
-    if (shopLink) shopLink.href = `${location.protocol}//${location.hostname.slice('admin.'.length)}/`;
-  }
 
   boot();
 })();

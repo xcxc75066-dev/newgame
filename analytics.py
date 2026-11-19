@@ -483,6 +483,49 @@ class Analytics:
             "order_hours": [{"hour": h, "orders": n} for h, n in order_hours.most_common(3)],
         }
 
+    def dashboard(self, now: datetime | None = None) -> dict[str, Any]:
+        """Everything the CMS home screen shows, in one call."""
+        now = (now or shop_now()).astimezone(SHOP_TZ)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start = today_start - timedelta(days=1)
+        # Fair comparison: today so far vs. yesterday up to the same hour.
+        today = self.overview(today_start, now)
+        before = self.overview(yesterday_start, yesterday_start + (now - today_start))
+
+        def kpi(o: dict[str, Any]) -> dict[str, Any]:
+            f = o["funnel"]
+            return {"visitors": f["visitors"], "orders": f["valid_orders"], "revenue": o["revenue"],
+                    "conversion": round(100 * f["valid_orders"] / f["visitors"], 1) if f["visitors"] else 0}
+
+        week_start = today_start - timedelta(days=6)
+        days = [(week_start + timedelta(days=i)).date() for i in range(7)]
+        sales = {d: {"orders": 0, "revenue": 0.0} for d in days}
+        with self._connect() as connection:
+            for row in connection.execute(
+                "SELECT created_at, total_cents FROM orders WHERE created_at >= ? AND status <> 'cancelled'",
+                (_iso_utc(week_start),),
+            ):
+                day = datetime.fromisoformat(row["created_at"]).astimezone(SHOP_TZ).date()
+                if day in sales:
+                    sales[day]["orders"] += 1
+                    sales[day]["revenue"] += row["total_cents"] / 100
+        week_rows = self.product_rows(now - timedelta(days=7), now)
+        today_rows = [r for r in self.product_rows(today_start, now) if r["orders"]]
+        last_day = self.overview(now - timedelta(days=1), now)
+        return {
+            "today": kpi(today),
+            "yesterday": kpi(before),
+            "sales": [{"date": d.isoformat(), "weekday": d.weekday(), **sales[d]} for d in days],
+            "top": [{"product": r["product"], "orders": r["orders"], "quantity": r["quantity"], "revenue": r["revenue"]}
+                    for r in today_rows[:3]],
+            "alerts": {
+                "suspicious": last_day["suspicious"][:5],
+                "no_views_7d": [r["product"] for r in week_rows if not r["views"]][:5],
+                "empty_searches": last_day["empty_searches"][:3],
+                "telegram": self.telegram_configured(),
+            },
+        }
+
     # -------------------------------------------------------------- messages
     @staticmethod
     def _period(start: datetime, end: datetime) -> str:

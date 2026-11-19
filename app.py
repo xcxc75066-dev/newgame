@@ -697,6 +697,13 @@ class OrderStore:
                 result.append(self._row_to_order(row, item_rows))
         return result
 
+    def status_counts(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT status, COUNT(*) AS n FROM orders GROUP BY status").fetchall()
+        counts = {status: 0 for status in ALLOWED_STATUSES}
+        counts.update({row["status"]: row["n"] for row in rows})
+        return counts
+
     def update_status(self, order_id: str, status: str) -> dict[str, Any] | None:
         if status not in ALLOWED_STATUSES:
             raise OrderValidationError(
@@ -1040,6 +1047,13 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                     "telegram": self.server.analytics.telegram_configured(),
                 })
                 return
+            if path == "/api/cms/dashboard" and method == "GET":
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True,
+                    **self.server.analytics.dashboard(),
+                    "counts": self.server.store.status_counts(),
+                })
+                return
             if path == "/api/cms/report/send" and method == "POST":
                 kind = "daily" if self._read_json().get("kind") == "daily" else "6h"
                 if not self.server.analytics.telegram_configured():
@@ -1070,7 +1084,9 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 except ValueError:
                     raise CmsError(400, "طلب غير صالح.") from None
                 orders = self.server.store.list_orders(status=status, limit=limit, offset=offset)
-                self._send_cms(HTTPStatus.OK, {"ok": True, "orders": orders})
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True, "orders": orders, "counts": self.server.store.status_counts(),
+                })
                 return
             match = re.fullmatch(r"/api/cms/orders/([a-fA-F0-9-]{20,})", path)
             if match and method == "PATCH":

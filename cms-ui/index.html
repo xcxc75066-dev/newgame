@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#0A3A2A">
+  <meta name="theme-color" content="#0F1A16">
   <title>Amani CMS</title>
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="stylesheet" href="/mycmseditor/app.css">
@@ -18,109 +18,152 @@
   <main id="loginScreen" class="login" hidden>
     <form id="loginForm" class="login-card" autocomplete="on">
       <div class="brand brand-lg">
-        <img src="/assets/favicon.svg" alt="">
+        <span class="brand-mark" data-icon="bag"></span>
         <div><strong>AMANI</strong><span>لوحة التحكم</span></div>
       </div>
       <label class="field">
         <span>رمز الدخول</span>
         <div class="password-wrap">
           <input id="password" name="password" type="password" autocomplete="current-password" required dir="ltr">
-          <button type="button" id="togglePassword" class="icon-btn" aria-label="إظهار رمز الدخول">👁</button>
+          <button type="button" id="togglePassword" class="icon-btn" aria-label="إظهار رمز الدخول" data-icon="eye"></button>
         </div>
       </label>
       <button class="btn primary block" type="submit" id="loginBtn">دخول</button>
       <p class="form-error" id="loginError" role="alert"></p>
-      <p class="hint" id="notConfigured" hidden>
-        لم يتم تعيين رمز الدخول على السيرفر بعد.
-      </p>
-      <p class="hint muted">🔒 اتصال محمي · الجلسة تنتهي بعد 24 ساعة</p>
+      <p class="hint" id="notConfigured" hidden>لم يتم تعيين رمز الدخول على السيرفر بعد.</p>
+      <p class="hint center"><span data-icon="lock" class="inline-icon"></span> اتصال محمي · الجلسة تنتهي بعد 24 ساعة</p>
     </form>
   </main>
 
   <!-- App -->
-  <div id="appScreen" hidden>
-    <header class="topbar">
-      <div class="brand">
-        <img src="/assets/favicon.svg" alt="">
+  <div id="appScreen" class="app" hidden>
+    <nav class="nav" id="navTabs" aria-label="القائمة">
+      <div class="nav-brand">
+        <span class="brand-mark small" data-icon="bag"></span>
         <div><strong>AMANI</strong><span>CMS</span></div>
       </div>
-      <div class="topbar-actions">
-        <a class="btn ghost small" href="/" target="_blank" rel="noopener">المتجر ↗</a>
-        <button class="btn ghost small" id="logoutBtn" type="button">خروج</button>
-      </div>
-    </header>
-
-    <nav class="tabs" role="tablist">
-      <button type="button" role="tab" data-tab="products" class="active">المنتجات</button>
-      <button type="button" role="tab" data-tab="categories">التصنيفات</button>
-      <button type="button" role="tab" data-tab="orders">الطلبات</button>
-      <button type="button" role="tab" data-tab="stats">الإحصائيات</button>
-      <button type="button" role="tab" data-tab="history">السجل</button>
+      <button type="button" data-tab="home" class="active"><span data-icon="home"></span><b>الرئيسية</b></button>
+      <button type="button" data-tab="orders"><span data-icon="box"></span><b>الطلبات</b><i class="nav-badge" id="navPending" hidden></i></button>
+      <button type="button" data-tab="products"><span data-icon="tag"></span><b>المنتجات</b></button>
+      <button type="button" data-tab="stats"><span data-icon="chart"></span><b>الإحصائيات</b></button>
+      <button type="button" data-tab="more"><span data-icon="dots"></span><b>المزيد</b></button>
     </nav>
 
-    <section id="tab-products" class="panel">
-      <div class="stats" id="productStats"></div>
-      <div class="toolbar">
-        <input type="search" id="productSearch" placeholder="ابحث عن منتج…" aria-label="بحث">
-        <select id="productFilter" aria-label="تصفية">
-          <option value="all">كل المنتجات</option>
-          <option value="popular">الأكثر طلباً</option>
-          <option value="more">منتجات أخرى / العروض</option>
-          <option value="hidden">المخفية</option>
-        </select>
-      </div>
-      <div id="productList" class="product-list"></div>
-      <button class="fab" id="addProductBtn" type="button" aria-label="منتج جديد">＋ منتج جديد</button>
-    </section>
+    <div class="content">
+      <!-- Home -->
+      <section id="tab-home" class="panel">
+        <header class="page-head">
+          <div class="brand">
+            <span class="brand-mark" data-icon="bag"></span>
+            <div><span class="muted small-text" id="greeting">مرحباً</span><strong class="page-title">Amani Market</strong></div>
+          </div>
+          <button type="button" class="icon-btn" id="refreshHome" aria-label="تحديث" data-icon="refresh"></button>
+        </header>
+        <div id="homeBody"><div class="spinner"></div></div>
+      </section>
 
-    <section id="tab-orders" class="panel" hidden>
-      <div class="toolbar">
-        <select id="orderFilter" aria-label="حالة الطلب">
-          <option value="">كل الطلبات</option>
-        </select>
-        <button class="btn ghost small" id="refreshOrders" type="button">تحديث ⟳</button>
-      </div>
-      <div id="orderList" class="order-list"></div>
-      <button class="btn ghost block" id="moreOrders" type="button" hidden>تحميل المزيد</button>
-    </section>
+      <!-- Orders -->
+      <section id="tab-orders" class="panel" hidden>
+        <header class="page-head">
+          <h1 class="page-title">الطلبات</h1>
+          <button class="icon-btn" id="refreshOrders" type="button" aria-label="تحديث" data-icon="refresh"></button>
+        </header>
+        <div class="chips scroll-x" id="orderStages" role="group" aria-label="مراحل الطلب"></div>
+        <div id="orderList" class="order-list"></div>
+        <button class="btn ghost block" id="moreOrders" type="button" hidden>تحميل المزيد</button>
+      </section>
 
-    <section id="tab-categories" class="panel" hidden>
-      <p class="hint">كل تصنيف كيبان فالمنيو ديال المتجر، وعندو صفحة خاصة بيه فيها المنتجات اللي اخترتي ليه.</p>
-      <button class="btn primary block" id="addCategoryBtn" type="button">＋ تصنيف جديد</button>
-      <div id="categoryList" class="category-list"></div>
-    </section>
+      <!-- Products -->
+      <section id="tab-products" class="panel" hidden>
+        <header class="page-head">
+          <h1 class="page-title">المنتجات</h1>
+          <span class="muted" id="productStats"></span>
+        </header>
+        <label class="search">
+          <span data-icon="search"></span>
+          <span class="sr-only">بحث عن منتوج</span>
+          <input type="search" id="productSearch" placeholder="ابحث عن منتوج…">
+        </label>
+        <div class="chips scroll-x" id="productChips" role="group" aria-label="تصفية"></div>
+        <div id="productList" class="product-grid"></div>
+        <button class="fab" id="addProductBtn" type="button"><span data-icon="plus"></span>منتج جديد</button>
+      </section>
 
-    <section id="tab-stats" class="panel" hidden>
-      <div class="toolbar period-bar" role="group" aria-label="المدة">
-        <button type="button" class="chip period active" data-days="1">آخر 24 ساعة</button>
-        <button type="button" class="chip period" data-days="7">7 أيام</button>
-        <button type="button" class="chip period" data-days="30">30 يوماً</button>
-      </div>
-      <div id="statsBody"><div class="spinner"></div></div>
-      <div class="stats-actions">
-        <button class="btn secondary" id="downloadCsvBtn" type="button">⬇️ تحميل CSV (Excel)</button>
-        <button class="btn ghost" id="sendReport6hBtn" type="button">📨 تقرير 6 ساعات لـ Telegram</button>
-        <button class="btn ghost" id="sendReportDailyBtn" type="button">📨 التقرير اليومي لـ Telegram</button>
-      </div>
-    </section>
+      <!-- Statistics -->
+      <section id="tab-stats" class="panel" hidden>
+        <header class="page-head"><h1 class="page-title">الإحصائيات</h1></header>
+        <div class="chips" role="group" aria-label="المدة">
+          <button type="button" class="chip period active" data-days="1">آخر 24 ساعة</button>
+          <button type="button" class="chip period" data-days="7">7 أيام</button>
+          <button type="button" class="chip period" data-days="30">30 يوماً</button>
+        </div>
+        <div id="statsBody"><div class="spinner"></div></div>
+        <div class="stats-actions">
+          <button class="btn secondary" id="downloadCsvBtn" type="button"><span data-icon="download"></span>تحميل CSV (Excel)</button>
+          <button class="btn ghost" id="sendReport6hBtn" type="button"><span data-icon="send"></span>تقرير 6 ساعات لـ Telegram</button>
+          <button class="btn ghost" id="sendReportDailyBtn" type="button"><span data-icon="send"></span>التقرير اليومي لـ Telegram</button>
+        </div>
+      </section>
 
-    <section id="tab-history" class="panel" hidden>
-      <p class="hint">كل حفظ يحتفظ بالنسخة السابقة تلقائياً. يمكنك الرجوع لأي نسخة.</p>
-      <div id="historyList" class="history-list"></div>
-    </section>
+      <!-- More -->
+      <section id="tab-more" class="panel" hidden>
+        <header class="page-head"><h1 class="page-title">المزيد</h1></header>
+        <div class="menu-list">
+          <button type="button" class="menu-item" data-go="categories"><span data-icon="folder"></span><b>التصنيفات</b><small>الأقسام اللي فالمنيو ديال المتجر</small></button>
+          <button type="button" class="menu-item" data-go="history"><span data-icon="history"></span><b>السجل</b><small>رجوع لنسخة قديمة من المنتجات</small></button>
+          <a class="menu-item" id="shopLink" href="/" target="_blank" rel="noopener"><span data-icon="external"></span><b>فتح المتجر</b><small>boutiqueamani-maroc.com</small></a>
+          <button type="button" class="menu-item" id="themeToggle"><span data-icon="moon" id="themeIcon"></span><b id="themeLabel">الوضع الفاتح</b><small>بدّل بين الليل والنهار</small></button>
+          <button type="button" class="menu-item danger" id="logoutBtn"><span data-icon="logout"></span><b>خروج</b><small>سد الجلسة على هاد الجهاز</small></button>
+        </div>
+      </section>
+
+      <!-- Categories -->
+      <section id="tab-categories" class="panel" hidden>
+        <header class="page-head">
+          <button type="button" class="icon-btn" data-go="more" aria-label="رجوع" data-icon="back"></button>
+          <h1 class="page-title grow">التصنيفات</h1>
+        </header>
+        <p class="hint">كل تصنيف كيبان فالمنيو ديال المتجر، وعندو صفحة خاصة بيه فيها المنتجات اللي اخترتي ليه.</p>
+        <button class="btn primary block" id="addCategoryBtn" type="button"><span data-icon="plus"></span>تصنيف جديد</button>
+        <div id="categoryList" class="category-list"></div>
+      </section>
+
+      <!-- History -->
+      <section id="tab-history" class="panel" hidden>
+        <header class="page-head">
+          <button type="button" class="icon-btn" data-go="more" aria-label="رجوع" data-icon="back"></button>
+          <h1 class="page-title grow">السجل</h1>
+        </header>
+        <p class="hint">كل حفظ كيحتافظ بالنسخة اللي قبلو. تقدر ترجع لأي نسخة.</p>
+        <div id="historyList" class="history-list"></div>
+      </section>
+    </div>
   </div>
 
   <!-- Product editor -->
-  <div id="editor" class="editor" hidden role="dialog" aria-modal="true" aria-labelledby="editorTitle">
-    <div class="editor-sheet">
-      <div class="editor-header">
-        <button type="button" class="icon-btn" id="editorClose" aria-label="إغلاق">✕</button>
-        <h2 id="editorTitle">منتج جديد</h2>
-        <button type="button" class="btn primary small" id="editorSave">حفظ</button>
+  <div id="editor" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+    <div class="sheet-panel">
+      <div class="sheet-head">
+        <button type="button" class="icon-btn" id="editorClose" aria-label="رجوع" data-icon="back"></button>
+        <div class="grow"><small class="muted">تعديل المنتوج</small><h2 id="editorTitle">منتج جديد</h2></div>
+        <button type="button" class="btn primary" id="editorSave">حفظ</button>
       </div>
-      <form id="editorForm" class="editor-body" novalidate>
+      <form id="editorForm" class="sheet-body" novalidate>
+        <section class="preview-card" id="editorPreview" aria-label="معاينة فالمتجر"></section>
+
         <fieldset class="card">
-          <legend>المعلومات الأساسية</legend>
+          <legend>الصورة *</legend>
+          <div class="image-row">
+            <div class="image-preview" id="imagePreview"><span>لا توجد صورة</span></div>
+            <div class="image-actions">
+              <button type="button" class="btn secondary block" id="uploadMainBtn"><span data-icon="camera"></span>رفع صورة</button>
+              <label class="field"><span>أو رابط الصورة</span><input id="f-image" dir="ltr" placeholder="https://…"></label>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend>المعلومات</legend>
           <label class="field"><span>اسم المنتج *</span><input id="f-title" dir="auto" maxlength="120" required></label>
           <label class="field"><span>الماركة</span><input id="f-brand" dir="auto" maxlength="60" placeholder="AMANI PARFUMS"></label>
           <label class="field"><span>الوصف</span><textarea id="f-description" dir="auto" rows="4" maxlength="2000"></textarea></label>
@@ -129,34 +172,23 @@
         <fieldset class="card">
           <legend>الثمن</legend>
           <div class="grid-2">
-            <label class="field"><span>الثمن (درهم) *</span><input id="f-price" inputmode="decimal" dir="ltr" required></label>
-            <label class="field"><span>الثمن قبل التخفيض</span><input id="f-oldPrice" inputmode="decimal" dir="ltr" placeholder="اختياري"></label>
+            <label class="field"><span>الثمن (DH) *</span><input id="f-price" inputmode="decimal" dir="ltr" required></label>
+            <label class="field"><span>قبل التخفيض</span><input id="f-oldPrice" inputmode="decimal" dir="ltr" placeholder="اختياري"></label>
           </div>
-          <p class="hint" id="discountHint"></p>
+          <p class="note" id="discountHint"></p>
         </fieldset>
 
         <fieldset class="card">
-          <legend>الصورة *</legend>
-          <div class="image-row">
-            <div class="image-preview" id="imagePreview"><span>لا توجد صورة</span></div>
-            <div class="image-actions">
-              <button type="button" class="btn secondary" id="uploadMainBtn">📷 رفع صورة</button>
-              <label class="field"><span>أو رابط الصورة</span><input id="f-image" dir="ltr" placeholder="https://…"></label>
-            </div>
-          </div>
-        </fieldset>
-
-        <fieldset class="card">
-          <legend>العرض في المتجر</legend>
+          <legend>العرض فالمتجر</legend>
           <label class="field"><span>القسم</span>
             <select id="f-list">
               <option value="popular">الأكثر طلباً (الصفحة الرئيسية)</option>
               <option value="more">منتجات أخرى / العروض</option>
             </select>
           </label>
-          <label class="switch"><input type="checkbox" id="f-visible"><span class="slider"></span><span>ظاهر في المتجر</span></label>
+          <label class="switch"><input type="checkbox" id="f-visible"><span class="slider"></span><span>ظاهر فالمتجر</span></label>
           <label class="field date-field"><span>تاريخ الإضافة</span><input type="date" id="f-addedAt" dir="ltr"></label>
-          <p class="hint" id="autoSectionsHint"></p>
+          <p class="note" id="autoSectionsHint"></p>
         </fieldset>
 
         <fieldset class="card">
@@ -167,41 +199,45 @@
         <fieldset class="card">
           <legend>الخيارات (الحجم، اللون…)</legend>
           <div id="groupsEditor"></div>
-          <div class="chip-row">
-            <button type="button" class="chip" data-preset-group="size">＋ الحجم</button>
-            <button type="button" class="chip" data-preset-group="color">＋ اللون</button>
-            <button type="button" class="chip" data-preset-group="custom">＋ خيار آخر</button>
+          <div class="chips wrap">
+            <button type="button" class="chip dashed" data-preset-group="size"><span data-icon="plus"></span>الحجم</button>
+            <button type="button" class="chip dashed" data-preset-group="color"><span data-icon="plus"></span>اللون</button>
+            <button type="button" class="chip dashed" data-preset-group="custom"><span data-icon="plus"></span>خيار آخر</button>
           </div>
         </fieldset>
 
         <fieldset class="card">
           <legend>الشارات على الصورة</legend>
           <div id="badgesEditor"></div>
-          <div class="chip-row">
-            <button type="button" class="chip" data-preset-badge="new">＋ NEW</button>
-            <button type="button" class="chip" data-preset-badge="best">＋ BEST SELLER</button>
-            <button type="button" class="chip" data-preset-badge="discount">＋ نسبة التخفيض</button>
-            <button type="button" class="chip" data-preset-badge="custom">＋ شارة أخرى</button>
+          <div class="chips wrap">
+            <button type="button" class="chip dashed" data-preset-badge="new"><span data-icon="plus"></span>NEW</button>
+            <button type="button" class="chip dashed" data-preset-badge="best"><span data-icon="plus"></span>BEST SELLER</button>
+            <button type="button" class="chip dashed" data-preset-badge="discount"><span data-icon="plus"></span>نسبة التخفيض</button>
+            <button type="button" class="chip dashed" data-preset-badge="custom"><span data-icon="plus"></span>شارة أخرى</button>
           </div>
         </fieldset>
 
         <div class="danger-zone" id="dangerZone">
-          <button type="button" class="btn danger block" id="editorDelete">🗑 حذف المنتج</button>
+          <button type="button" class="btn danger block" id="editorDelete"><span data-icon="trash"></span>حذف المنتج</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- Pick the products of one category -->
-  <div id="catSheet" class="editor" hidden role="dialog" aria-modal="true" aria-labelledby="catSheetTitle">
-    <div class="editor-sheet">
-      <div class="editor-header">
-        <button type="button" class="icon-btn" id="catSheetClose" aria-label="إغلاق">✕</button>
-        <h2 id="catSheetTitle">المنتجات</h2>
-        <button type="button" class="btn primary small" id="catSheetSave">حفظ</button>
+  <div id="catSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="catSheetTitle">
+    <div class="sheet-panel">
+      <div class="sheet-head">
+        <button type="button" class="icon-btn" id="catSheetClose" aria-label="إغلاق" data-icon="close"></button>
+        <h2 id="catSheetTitle" class="grow">المنتجات</h2>
+        <button type="button" class="btn primary" id="catSheetSave">حفظ</button>
       </div>
-      <div class="editor-body">
-        <input type="search" id="catSheetSearch" placeholder="ابحث عن منتج…" aria-label="بحث">
+      <div class="sheet-body">
+        <label class="search">
+          <span data-icon="search"></span>
+          <span class="sr-only">بحث</span>
+          <input type="search" id="catSheetSearch" placeholder="ابحث عن منتوج…">
+        </label>
         <p class="hint" id="catSheetCount"></p>
         <div id="catSheetList" class="pick-list"></div>
       </div>

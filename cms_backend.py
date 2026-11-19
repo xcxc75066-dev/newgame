@@ -40,6 +40,9 @@ PASSWORD_ENV = "AMANI_CMS_PASSWORD_HASH"
 # "Related" and "Offers" (see the storefront's JSON catalog engine).
 PRODUCT_LISTS = (("popular", "productspage-1.json"), ("more", "productspage-2.json"))
 MAX_PRODUCTS = 300
+MAX_CATEGORIES = 50
+CATEGORIES_FILE = "categories.json"
+CATEGORY_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,59}$")
 HISTORY_KEEP = 60
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 BADGE_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
@@ -368,7 +371,30 @@ def clean_product(
     }
 
 
-def clean_catalog(lists: Any) -> dict[str, list[dict[str, Any]]]:
+def clean_categories(categories: Any) -> list[dict[str, Any]]:
+    """Menu categories: [{id, title, hidden}]. The id is also the page address (/c/<id>)."""
+    if not isinstance(categories, list) or len(categories) > MAX_CATEGORIES:
+        raise CmsError(400, f"التصنيفات غير صالحة (الحد {MAX_CATEGORIES}).")
+    cleaned, used, titles = [], set(), set()
+    for index, raw in enumerate(categories, start=1):
+        if not isinstance(raw, dict):
+            raise CmsError(400, f"التصنيف رقم {index}: بيانات غير صالحة.")
+        title = _text(raw.get("title"), f"التصنيف رقم {index} - الاسم", max_length=60)
+        if title.casefold() in titles:
+            raise CmsError(400, f"التصنيف «{title}» مكرر.")
+        titles.add(title.casefold())
+        category_id = str(raw.get("id") or "").strip()
+        if not CATEGORY_ID_PATTERN.fullmatch(category_id) or category_id in used:
+            base = slugify(title)
+            category_id = base if base != "product" and CATEGORY_ID_PATTERN.fullmatch(base) else f"cat-{secrets.token_hex(3)}"
+            while category_id in used:
+                category_id = f"{base[:50]}-{secrets.token_hex(2)}"
+        used.add(category_id)
+        cleaned.append({"id": category_id, "title": title, "hidden": bool(raw.get("hidden")), "order": index})
+    return cleaned
+
+
+def clean_catalog(lists: Any, category_ids: set[str] | None = None) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(lists, dict):
         raise CmsError(400, "بيانات المنتجات غير صالحة.")
     used_ids: set[str] = set()
@@ -386,6 +412,13 @@ def clean_catalog(lists: Any) -> dict[str, list[dict[str, Any]]]:
             clean_product(item, index, used_ids, used_slugs)
             for index, item in enumerate(items, start=1)
         ]
+        if category_ids is not None:
+            for product, raw in zip(cleaned[key], items):
+                wanted = raw.get("categories") if isinstance(raw, dict) else None
+                product["categories"] = [
+                    c for c in dict.fromkeys(str(x) for x in (wanted if isinstance(wanted, list) else []))
+                    if c in category_ids
+                ]
     return cleaned
 
 
@@ -415,11 +448,24 @@ class ContentStore:
         self._lock = threading.Lock()
         for directory in (self.products_dir, self.history_dir, self.uploads_dir):
             directory.mkdir(parents=True, exist_ok=True)
+        self.categories_path = data_dir / "content" / CATEGORIES_FILE
         if not any(self.products_dir.glob("*.json")) and seed_products_dir.is_dir():
             # First start: begin with the products that were in the repository.
             for source in sorted(seed_products_dir.glob("*.json")):
                 shutil.copy2(source, self.products_dir / source.name)
         self._add_missing_dates()
+        self._add_first_category()
+
+    def _add_first_category(self) -> None:
+        """First time categories exist: one "Perfumes" category with every product."""
+        if self.categories_path.is_file():
+            return
+        lists, _ = self.read()
+        for items in lists.values():
+            for product in items:
+                product.setdefault("categories", ["perfumes"])
+        self._write(lists)
+        self._write_categories([{"id": "perfumes", "title": "Perfumes", "hidden": False, "order": 1}])
 
     def _add_missing_dates(self) -> None:
         """Older products have no "addedAt" yet: give them today's date once."""
@@ -436,14 +482,30 @@ class ContentStore:
         for key, filename in PRODUCT_LISTS:
             path = self.products_dir / filename
             raw[key] = path.read_bytes() if path.is_file() else b""
+        raw["categories"] = self.categories_path.read_bytes() if self.categories_path.is_file() else b""
         return raw
 
     @staticmethod
     def _version(raw: dict[str, bytes]) -> str:
         digest = hashlib.sha256()
-        for key, _ in PRODUCT_LISTS:
-            digest.update(key.encode() + b"\0" + raw[key] + b"\0")
+        for key in [k for k, _ in PRODUCT_LISTS] + ["categories"]:
+            digest.update(key.encode() + b"\0" + raw.get(key, b"") + b"\0")
         return digest.hexdigest()[:20]
+
+    def categories(self) -> list[dict[str, Any]]:
+        try:
+            data = json.loads(self.categories_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        items = data.get("categories") if isinstance(data, dict) else data
+        return [c for c in items if isinstance(c, dict)] if isinstance(items, list) else []
+
+    def public_categories(self) -> list[dict[str, Any]]:
+        return [{"id": c.get("id"), "title": c.get("title")} for c in self.categories() if not c.get("hidden")]
+
+    def _write_categories(self, categories: list[dict[str, Any]]) -> None:
+        body = json.dumps({"categories": categories}, ensure_ascii=False, indent=2) + "\n"
+        _atomic_write(self.categories_path, body.encode("utf-8"))
 
     @staticmethod
     def _parse(data: bytes) -> list[dict[str, Any]]:
@@ -468,21 +530,27 @@ class ContentStore:
     def _snapshot(self, lists: dict[str, list[dict[str, Any]]], reason: str) -> None:
         name = f"products-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}Z.json"
         body = json.dumps(
-            {"saved_at": utc_stamp(), "reason": reason, "lists": lists}, ensure_ascii=False
+            {"saved_at": utc_stamp(), "reason": reason, "lists": lists, "categories": self.categories()},
+            ensure_ascii=False,
         )
         _atomic_write(self.history_dir / name, body.encode("utf-8"))
         snapshots = sorted(self.history_dir.glob("products-*.json"))
         for old in snapshots[:-HISTORY_KEEP]:
             old.unlink(missing_ok=True)
 
-    def save(self, lists: Any, expected_version: str) -> tuple[dict[str, list[dict[str, Any]]], str]:
-        cleaned = clean_catalog(lists)
+    def save(
+        self, lists: Any, expected_version: str, categories: Any = None
+    ) -> tuple[dict[str, list[dict[str, Any]]], str]:
         with self._lock:
+            new_categories = clean_categories(categories) if categories is not None else self.categories()
+            cleaned = clean_catalog(lists, {c["id"] for c in new_categories})
             current, version = self.read()
             if not hmac.compare_digest(str(expected_version or ""), version):
                 raise CmsError(409, "تم تعديل المنتجات من مكان آخر. حدّث الصفحة ثم أعد المحاولة.")
             self._snapshot(current, "before-save")
             self._write(cleaned)
+            if categories is not None:
+                self._write_categories(new_categories)
             return self.read()
 
     def history(self) -> list[dict[str, Any]]:
@@ -508,14 +576,18 @@ class ContentStore:
         path = self.history_dir / name
         if not path.is_file():
             raise CmsError(404, "هذه النسخة غير موجودة.")
-        lists = json.loads(path.read_text(encoding="utf-8")).get("lists") or {}
-        cleaned = clean_catalog(lists)
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        lists = snapshot.get("lists") or {}
         with self._lock:
+            # Old copies made before categories existed keep today's categories.
+            categories = clean_categories(snapshot["categories"]) if isinstance(snapshot.get("categories"), list) else self.categories()
+            cleaned = clean_catalog(lists, {c["id"] for c in categories})
             current, version = self.read()
             if not hmac.compare_digest(str(expected_version or ""), version):
                 raise CmsError(409, "تم تعديل المنتجات من مكان آخر. حدّث الصفحة ثم أعد المحاولة.")
             self._snapshot(current, "before-restore")
             self._write(cleaned)
+            self._write_categories(categories)
             return self.read()
 
     def save_upload(self, data: bytes) -> str:

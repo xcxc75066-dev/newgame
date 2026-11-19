@@ -28,7 +28,7 @@ import threading
 import uuid
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
@@ -44,11 +44,14 @@ ALLOWED_STATUSES = frozenset(
     {"pending", "confirmed", "processing", "shipped", "delivered", "cancelled"}
 )
 PRODUCT_ROUTE_PATTERN = re.compile(r"^/p/[^/]+/?$", re.IGNORECASE)
+CATEGORY_ROUTE_PATTERN = re.compile(r"^/c/[^/]+/?$", re.IGNORECASE)
+TRACKING_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 APP_DIR = Path(__file__).resolve().parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 import cms_backend  # noqa: E402  (needs APP_DIR on sys.path)
+from analytics import Analytics, shop_now  # noqa: E402
 from cms_backend import CmsError, CmsService  # noqa: E402
 
 CMS_PATH = "/mycmseditor"
@@ -364,6 +367,17 @@ def price_item_from_catalog(
     return unit_cents, chosen
 
 
+def _tracking_ids(value: Any) -> tuple[str, str]:
+    """Anonymous visitor/session ids sent with an order (never personal data)."""
+    if not isinstance(value, dict):
+        return "", ""
+    visitor, session = str(value.get("v") or ""), str(value.get("s") or "")
+    return (
+        visitor if TRACKING_ID_PATTERN.fullmatch(visitor) else "",
+        session if TRACKING_ID_PATTERN.fullmatch(session) else "",
+    )
+
+
 def validate_order_payload(
     payload: dict[str, Any], catalog: ProductCatalog | None = None
 ) -> dict[str, Any]:
@@ -439,6 +453,7 @@ def validate_order_payload(
         "customer": customer_data,
         "items": items,
         "total_cents": calculated_total,
+        "tracking": _tracking_ids(payload.get("tracking")),
     }
 
 @dataclass(frozen=True)
@@ -542,6 +557,10 @@ class OrderStore:
                     ON product_clicks(product_id);
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(orders)")}
+            for column in ("visitor_id", "session_id"):
+                if column not in columns:
+                    connection.execute(f"ALTER TABLE orders ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
 
     @staticmethod
     def _order_number() -> str:
@@ -593,8 +612,9 @@ class OrderStore:
                 INSERT INTO orders (
                     order_id, order_number, status, channel,
                     customer_name, customer_phone, customer_address,
-                    currency, total_cents, client_ip, created_at, updated_at
-                ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    currency, total_cents, client_ip, created_at, updated_at,
+                    visitor_id, session_id
+                ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order_id,
@@ -608,6 +628,8 @@ class OrderStore:
                     client_ip[:80],
                     timestamp,
                     timestamp,
+                    order["tracking"][0],
+                    order["tracking"][1],
                 ),
             )
             connection.executemany(
@@ -973,17 +995,60 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/cms/products" and method == "GET":
                 lists, version = cms.content.read()
-                self._send_cms(HTTPStatus.OK, {"ok": True, "lists": lists, "version": version})
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True, "lists": lists, "version": version, "categories": cms.content.categories(),
+                })
                 return
             if path == "/api/cms/products" and method == "PUT":
                 payload = self._read_json()
-                lists, version = cms.content.save(payload.get("lists"), payload.get("version"))
+                lists, version = cms.content.save(
+                    payload.get("lists"), payload.get("version"), payload.get("categories")
+                )
                 LOGGER.info("cms_products_saved ip=%s", self._get_client_ip())
-                self._send_cms(HTTPStatus.OK, {"ok": True, "lists": lists, "version": version})
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True, "lists": lists, "version": version, "categories": cms.content.categories(),
+                })
                 return
             if path == "/api/cms/upload" and method == "POST":
                 url = cms.content.save_upload(self._read_raw_body(cms_backend.MAX_UPLOAD_BYTES))
                 self._send_cms(HTTPStatus.CREATED, {"ok": True, "url": url})
+                return
+            if path in {"/api/cms/stats", "/api/cms/stats.csv"} and method == "GET":
+                try:
+                    days = int((query.get("days") or ["1"])[0])
+                except ValueError:
+                    days = 1
+                days = days if days in {1, 7, 30} else 1
+                end = shop_now()
+                start = end - timedelta(days=days)
+                rows = self.server.analytics.product_rows(start, end)
+                if path.endswith(".csv"):
+                    body = self.server.analytics.products_csv(rows)
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Disposition", f'attachment; filename="amani-{days}d-{end:%Y-%m-%d}.csv"')
+                    self.send_header("Content-Length", str(len(body)))
+                    for key, value in CMS_SECURITY_HEADERS.items():
+                        self.send_header(key, value)
+                    self.end_headers()
+                    self._write_body(body)
+                    return
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True,
+                    "overview": self.server.analytics.overview(start, end),
+                    "products": rows,
+                    "telegram": self.server.analytics.telegram_configured(),
+                })
+                return
+            if path == "/api/cms/report/send" and method == "POST":
+                kind = "daily" if self._read_json().get("kind") == "daily" else "6h"
+                if not self.server.analytics.telegram_configured():
+                    raise CmsError(409, "Telegram ما زال ما مربوطش. شغّل set_telegram.py أولاً.")
+                end = shop_now()
+                start = end - (timedelta(days=1) if kind == "daily" else timedelta(hours=6))
+                if not self.server.analytics.send_report(kind, start, end):
+                    raise CmsError(502, "ما قدرناش نصيفطو التقرير لـ Telegram. حاول من بعد.")
+                self._send_cms(HTTPStatus.OK, {"ok": True})
                 return
             if path == "/api/cms/history" and method == "GET":
                 self._send_cms(HTTPStatus.OK, {"ok": True, "items": cms.content.history()})
@@ -991,7 +1056,9 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/cms/history/restore" and method == "POST":
                 payload = self._read_json()
                 lists, version = cms.content.restore(payload.get("name"), payload.get("version"))
-                self._send_cms(HTTPStatus.OK, {"ok": True, "lists": lists, "version": version})
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True, "lists": lists, "version": version, "categories": cms.content.categories(),
+                })
                 return
             if path == "/api/cms/orders" and method == "GET":
                 status = (query.get("status") or [""])[0] or None
@@ -1117,14 +1184,12 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             self._handle_cms("GET", path, query)
             return
 
-        if path == "/api/product-clicks":
-            raw_ids = query.get("ids", [""])[0]
-            product_ids = [
-                value.strip()[:160]
-                for value in raw_ids.split(",")
-                if value.strip()
-            ][:500]
-            self._send_json({"ok": True, "counts": self.server.store.product_click_counts(product_ids)})
+        if path == "/api/product-rank":
+            # Popularity order only (no numbers): view counts stay private.
+            self._send_json({"ok": True, "ranking": self.server.analytics.product_ranking()})
+            return
+        if path == "/api/categories":
+            self._send_json({"ok": True, "categories": self.server.cms.content.public_categories()})
             return
 
         # ---------------------------------------------------------
@@ -1151,7 +1216,11 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             if favicon is not None:
                 self._send_file(favicon, STATIC_CONTENT_TYPES[".svg"], "public, max-age=86400")
                 return
-        if path in {"/", "/index.html"} or PRODUCT_ROUTE_PATTERN.fullmatch(path):
+        if (
+            path in {"/", "/index.html"}
+            or PRODUCT_ROUTE_PATTERN.fullmatch(path)
+            or CATEGORY_ROUTE_PATTERN.fullmatch(path)
+        ):
             self._serve_html()
             return
             
@@ -1217,23 +1286,21 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/cms/"):
             self._handle_cms("POST", path, {})
             return
-        if path == "/api/product-clicks":
+        if path == "/api/t":
+            # Anonymous shop statistics. Always answer 204: never tell a client
+            # whether an event was kept (bad or excessive events are dropped).
             try:
-                payload = self._read_json()
-                product_id = clean_text(payload.get("product_id"), "product_id", max_length=160)
-                fingerprint = clean_text(payload.get("fingerprint"), "fingerprint", max_length=256)
-                if not re.fullmatch(r"[A-Za-z0-9:_-]{16,256}", fingerprint):
-                    raise OrderValidationError("fingerprint contains unsupported characters.")
-                counted, count = self.server.store.record_product_click(product_id, fingerprint)
-                self._send_json(
-                    {"ok": True, "counted": counted, "count": count},
-                    HTTPStatus.CREATED if counted else HTTPStatus.OK,
-                )
-            except OrderValidationError as exc:
-                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
-            except sqlite3.Error:
-                LOGGER.exception("database_error while recording product click")
-                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "The product click could not be stored.")
+                self.server.analytics.record(self._read_json(), self._get_client_ip())
+            except (OrderValidationError, sqlite3.Error):
+                pass
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        if path == "/api/product-clicks":
+            # Old pages still in visitors' browsers: accept and ignore.
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
             return
         if path != "/api/orders":
             self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
@@ -1316,6 +1383,10 @@ class AmaniHTTPServer(ThreadingHTTPServer):
         )
         self.catalog = ProductCatalog(self.cms.content.products_dir)
         self.store = OrderStore(config.db_path, self.catalog)
+        self.analytics = Analytics(
+            config.db_path,
+            lambda: [p for items in self.cms.content.read()[0].values() for p in items],
+        )
         super().__init__((config.host, config.port), AmaniRequestHandler)
 
 
@@ -1346,6 +1417,7 @@ def main() -> None:
         )
 
     server = AmaniHTTPServer(config)
+    server.analytics.start_scheduler()  # Telegram reports every 6 hours + daily at 21:00
     LOGGER.info(
         "Amani Order Server listening on http://%s:%s | database=%s | html=%s",
         config.host,

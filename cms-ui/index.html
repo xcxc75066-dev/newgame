@@ -52,7 +52,9 @@
 
     <nav class="tabs" role="tablist">
       <button type="button" role="tab" data-tab="products" class="active">المنتجات</button>
+      <button type="button" role="tab" data-tab="categories">التصنيفات</button>
       <button type="button" role="tab" data-tab="orders">الطلبات</button>
+      <button type="button" role="tab" data-tab="stats">الإحصائيات</button>
       <button type="button" role="tab" data-tab="history">السجل</button>
     </nav>
 
@@ -80,6 +82,26 @@
       </div>
       <div id="orderList" class="order-list"></div>
       <button class="btn ghost block" id="moreOrders" type="button" hidden>تحميل المزيد</button>
+    </section>
+
+    <section id="tab-categories" class="panel" hidden>
+      <p class="hint">كل تصنيف كيبان فالمنيو ديال المتجر، وعندو صفحة خاصة بيه فيها المنتجات اللي اخترتي ليه.</p>
+      <button class="btn primary block" id="addCategoryBtn" type="button">＋ تصنيف جديد</button>
+      <div id="categoryList" class="category-list"></div>
+    </section>
+
+    <section id="tab-stats" class="panel" hidden>
+      <div class="toolbar period-bar" role="group" aria-label="المدة">
+        <button type="button" class="chip period active" data-days="1">آخر 24 ساعة</button>
+        <button type="button" class="chip period" data-days="7">7 أيام</button>
+        <button type="button" class="chip period" data-days="30">30 يوماً</button>
+      </div>
+      <div id="statsBody"><div class="spinner"></div></div>
+      <div class="stats-actions">
+        <button class="btn secondary" id="downloadCsvBtn" type="button">⬇️ تحميل CSV (Excel)</button>
+        <button class="btn ghost" id="sendReport6hBtn" type="button">📨 تقرير 6 ساعات لـ Telegram</button>
+        <button class="btn ghost" id="sendReportDailyBtn" type="button">📨 التقرير اليومي لـ Telegram</button>
+      </div>
     </section>
 
     <section id="tab-history" class="panel" hidden>
@@ -138,6 +160,11 @@
         </fieldset>
 
         <fieldset class="card">
+          <legend>التصنيفات</legend>
+          <div id="categoryChecks" class="check-list"></div>
+        </fieldset>
+
+        <fieldset class="card">
           <legend>الخيارات (الحجم، اللون…)</legend>
           <div id="groupsEditor"></div>
           <div class="chip-row">
@@ -162,6 +189,22 @@
           <button type="button" class="btn danger block" id="editorDelete">🗑 حذف المنتج</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Pick the products of one category -->
+  <div id="catSheet" class="editor" hidden role="dialog" aria-modal="true" aria-labelledby="catSheetTitle">
+    <div class="editor-sheet">
+      <div class="editor-header">
+        <button type="button" class="icon-btn" id="catSheetClose" aria-label="إغلاق">✕</button>
+        <h2 id="catSheetTitle">المنتجات</h2>
+        <button type="button" class="btn primary small" id="catSheetSave">حفظ</button>
+      </div>
+      <div class="editor-body">
+        <input type="search" id="catSheetSearch" placeholder="ابحث عن منتج…" aria-label="بحث">
+        <p class="hint" id="catSheetCount"></p>
+        <div id="catSheetList" class="pick-list"></div>
+      </div>
     </div>
   </div>
 

@@ -40,6 +40,8 @@
 
   const state = {
     lists: { popular: [], more: [] },
+    categories: [],
+    statsDays: 1,
     version: '',
     editing: null, // { list, index (null = new), draft }
     dirty: false,
@@ -175,7 +177,9 @@
       button.classList.toggle('active', button.dataset.tab === name);
       button.setAttribute('aria-selected', String(button.dataset.tab === name));
     });
-    ['products', 'orders', 'history'].forEach((tab) => { $(`tab-${tab}`).hidden = tab !== name; });
+    ['products', 'categories', 'orders', 'stats', 'history'].forEach((tab) => { $(`tab-${tab}`).hidden = tab !== name; });
+    if (name === 'categories') renderCategoriesTab();
+    if (name === 'stats') loadStats();
     if (name === 'orders') loadOrders(true);
     if (name === 'history') loadHistory();
   }
@@ -188,15 +192,22 @@
     const data = await api('/products');
     state.lists = data.lists;
     state.version = data.version;
+    state.categories = data.categories || [];
     renderProducts();
+    renderCategoriesTab();
   }
 
-  async function saveLists(lists, successMessage) {
+  // Saves products (and the categories when given) in one go.
+  async function saveLists(lists, successMessage, categories) {
     try {
-      const data = await api('/products', { method: 'PUT', body: { lists, version: state.version } });
+      const body = { lists, version: state.version };
+      if (categories) body.categories = categories;
+      const data = await api('/products', { method: 'PUT', body });
       state.lists = data.lists;
       state.version = data.version;
+      state.categories = data.categories || [];
       renderProducts();
+      renderCategoriesTab();
       toast(successMessage || 'تم الحفظ ✓', 'success');
       return true;
     } catch (error) {
@@ -254,7 +265,9 @@
           product.hidden ? h('span', { class: 'tag grey', text: 'مخفي' }) : null,
           isNewProduct(product) ? h('span', { class: 'tag new', text: '✨ جديد' }) : null,
           isBestOffer(product) ? h('span', { class: 'tag offer', text: `🏷 عرض (توفير ${saving(product)} DH)` }) : null,
-          optionsCount ? h('span', { class: 'tag grey', text: `${optionsCount} خيارات` }) : null
+          optionsCount ? h('span', { class: 'tag grey', text: `${optionsCount} خيارات` }) : null,
+          ...(product.categories || []).map((id) => state.categories.find((c) => c.id === id))
+            .filter(Boolean).map((c) => h('span', { class: 'tag grey', text: `📁 ${c.title}` }))
         ),
         h('div', { class: 'row-actions' },
           h('button', { class: 'icon-btn', type: 'button', title: 'تعديل', 'aria-label': 'تعديل', onclick: open }, '✏️'),
@@ -312,7 +325,7 @@
     return {
       id: '', 'pro-id123': '', title: '', brand: 'AMANI PARFUMS', price: '', oldPrice: '',
       description: '', image: '', sections: ['popular', 'related', 'offers'], badges: [],
-      colors: [presetGroup('size')], hidden: false, addedAt: todayIso()
+      colors: [presetGroup('size')], hidden: false, addedAt: todayIso(), categories: []
     };
   }
 
@@ -358,6 +371,7 @@
     renderDiscount();
     renderGroups();
     renderBadges();
+    renderCategoryChecks();
     $('editor').hidden = false;
     document.body.style.overflow = 'hidden';
     $('editorForm').scrollTop = 0;
@@ -533,6 +547,24 @@
       renderBadges();
     });
   });
+
+  function renderCategoryChecks() {
+    const draft = state.editing.draft;
+    draft.categories = draft.categories || [];
+    const box = $('categoryChecks');
+    if (!state.categories.length) {
+      box.replaceChildren(h('p', { class: 'hint', text: 'لا توجد تصنيفات بعد. أضفها من خانة «التصنيفات».' }));
+      return;
+    }
+    box.replaceChildren(...state.categories.map((category) => h('label', { class: 'check-pill' },
+      h('input', { type: 'checkbox', checked: draft.categories.includes(category.id), onchange: (e) => {
+        draft.categories = e.target.checked
+          ? [...new Set([...draft.categories, category.id])]
+          : draft.categories.filter((id) => id !== category.id);
+      } }),
+      category.title, category.hidden ? ' (مخفي)' : ''
+    )));
+  }
 
   // Save from the editor
   function validateDraft(draft) {
@@ -758,7 +790,9 @@
       const data = await api('/history/restore', { method: 'POST', body: { name: item.name, version: state.version } });
       state.lists = data.lists;
       state.version = data.version;
+      state.categories = data.categories || [];
       renderProducts();
+      renderCategoriesTab();
       toast('تم الاسترجاع ✓', 'success');
       loadHistory();
     } catch (error) {
@@ -768,6 +802,224 @@
   }
 
   $('addProductBtn').addEventListener('click', () => openEditor('popular', null));
+
+  // -------------------------------------------------------------- categories
+  const shopBase = () => (location.hostname.startsWith('admin.')
+    ? `${location.protocol}//${location.hostname.slice('admin.'.length)}`
+    : location.origin);
+
+  function productsIn(categoryId) {
+    return allProducts().filter(({ product }) => (product.categories || []).includes(categoryId));
+  }
+
+  function saveCategories(categories, message) {
+    return saveLists(clone(state.lists), message, categories);
+  }
+
+  function renderCategoriesTab() {
+    const container = $('categoryList');
+    if (!container) return;
+    if (!state.categories.length) {
+      container.replaceChildren(h('p', { class: 'empty', text: 'لا توجد تصنيفات. اضغط «تصنيف جديد».' }));
+      return;
+    }
+    container.replaceChildren(...state.categories.map((category, index) => {
+      const count = productsIn(category.id).length;
+      const move = (step) => {
+        const next = clone(state.categories);
+        const target = index + step;
+        if (target < 0 || target >= next.length) return;
+        [next[index], next[target]] = [next[target], next[index]];
+        saveCategories(next, 'تم تغيير الترتيب');
+      };
+      return h('article', { class: `category-row${category.hidden ? ' is-hidden' : ''}` },
+        h('div', { class: 'category-head' },
+          h('div', {},
+            h('strong', { text: category.title }),
+            h('div', { class: 'hint', text: `${count} منتج${category.hidden ? ' · مخفي من المنيو' : ''}` })
+          ),
+          h('a', { href: `${shopBase()}/c/${encodeURIComponent(category.id)}`, target: '_blank', rel: 'noopener', text: 'عرض الصفحة ↗' })
+        ),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'btn secondary small', type: 'button', onclick: () => openCategorySheet(category.id) }, '📦 اختيار المنتجات'),
+          h('button', { class: 'icon-btn', type: 'button', title: 'تغيير الاسم', 'aria-label': 'تغيير الاسم', onclick: () => {
+            const title = (prompt('الاسم الجديد للتصنيف:', category.title) || '').trim();
+            if (!title || title === category.title) return;
+            const next = clone(state.categories);
+            next[index].title = title;
+            saveCategories(next, 'تم تغيير الاسم');
+          } }, '✏️'),
+          h('button', { class: 'icon-btn', type: 'button', title: category.hidden ? 'إظهار' : 'إخفاء', 'aria-label': category.hidden ? 'إظهار' : 'إخفاء', onclick: () => {
+            const next = clone(state.categories);
+            next[index].hidden = !next[index].hidden;
+            saveCategories(next, next[index].hidden ? 'التصنيف مخفي من المنيو' : 'التصنيف ظاهر فالمنيو');
+          } }, category.hidden ? '🙈' : '👁'),
+          h('button', { class: 'icon-btn', type: 'button', title: 'لأعلى', 'aria-label': 'لأعلى', disabled: index === 0, onclick: () => move(-1) }, '↑'),
+          h('button', { class: 'icon-btn', type: 'button', title: 'لأسفل', 'aria-label': 'لأسفل', disabled: index === state.categories.length - 1, onclick: () => move(1) }, '↓'),
+          h('button', { class: 'icon-btn danger', type: 'button', title: 'حذف', 'aria-label': 'حذف', onclick: () => {
+            if (!confirm(`حذف التصنيف «${category.title}»؟\nالمنتجات ما غاديش يتمسحو، غير كيتحيدو من هاد التصنيف.`)) return;
+            saveCategories(state.categories.filter((c) => c.id !== category.id), 'تم حذف التصنيف');
+          } }, '🗑')
+        )
+      );
+    }));
+  }
+
+  $('addCategoryBtn').addEventListener('click', async () => {
+    const title = (prompt('اسم التصنيف الجديد (مثال: المحفظات):') || '').trim();
+    if (!title) return;
+    const next = [...clone(state.categories), { id: '', title, hidden: false }];
+    if (await saveCategories(next, 'تم إنشاء التصنيف ✓ دابا اختار المنتجات ديالو')) {
+      const created = state.categories.find((c) => c.title === title);
+      if (created) openCategorySheet(created.id);
+    }
+  });
+
+  let sheetState = null;
+  function openCategorySheet(categoryId) {
+    const category = state.categories.find((c) => c.id === categoryId);
+    if (!category) return;
+    sheetState = { categoryId, picked: new Set(productsIn(categoryId).map(({ product }) => product.id)) };
+    $('catSheetTitle').textContent = `منتجات: ${category.title}`;
+    $('catSheetSearch').value = '';
+    renderCategorySheet();
+    $('catSheet').hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+
+  function renderCategorySheet() {
+    const query = $('catSheetSearch').value.trim().toLowerCase();
+    const rows = allProducts().filter(({ product }) => !query || product.title.toLowerCase().includes(query));
+    $('catSheetCount').textContent = `${sheetState.picked.size} منتج مختار`;
+    $('catSheetList').replaceChildren(...rows.map(({ product }) => h('label', { class: 'pick-row' },
+      h('input', { type: 'checkbox', checked: sheetState.picked.has(product.id), onchange: (e) => {
+        if (e.target.checked) sheetState.picked.add(product.id); else sheetState.picked.delete(product.id);
+        $('catSheetCount').textContent = `${sheetState.picked.size} منتج مختار`;
+      } }),
+      h('img', { src: product.image || PLACEHOLDER, alt: '', loading: 'lazy', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
+      h('div', {}, h('strong', { text: product.title }), h('small', { text: `${money(product.price)}${product.hidden ? ' · مخفي' : ''}` }))
+    )));
+  }
+
+  function closeCategorySheet() {
+    sheetState = null;
+    $('catSheet').hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  $('catSheetSearch').addEventListener('input', renderCategorySheet);
+  $('catSheetClose').addEventListener('click', closeCategorySheet);
+  $('catSheetSave').addEventListener('click', async () => {
+    const { categoryId, picked } = sheetState;
+    const lists = clone(state.lists);
+    Object.values(lists).forEach((items) => items.forEach((product) => {
+      const current = new Set(product.categories || []);
+      if (picked.has(product.id)) current.add(categoryId); else current.delete(categoryId);
+      product.categories = [...current];
+    }));
+    $('catSheetSave').disabled = true;
+    const saved = await saveLists(lists, 'تم حفظ منتجات التصنيف ✓');
+    $('catSheetSave').disabled = false;
+    if (saved) closeCategorySheet();
+  });
+
+  // -------------------------------------------------------------- statistics
+  document.querySelectorAll('.chip.period').forEach((chip) => chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip.period').forEach((c) => c.classList.toggle('active', c === chip));
+    state.statsDays = Number(chip.dataset.days);
+    loadStats();
+  }));
+
+  const pct = (part, whole) => (whole ? `${Math.round((100 * part) / whole)}%` : '—');
+  const hourLabel = (hour) => `${String(hour).padStart(2, '0')}:00`;
+
+  function table(headers, rows) {
+    return h('div', { class: 'table-wrap' }, h('table', { class: headers.length > 4 ? 'wide' : '' },
+      h('thead', {}, h('tr', {}, ...headers.map((title) => h('th', { text: title })))),
+      h('tbody', {}, ...rows.map((cells) => h('tr', {}, ...cells.map((cell) => h('td', { text: String(cell) })))))
+    ));
+  }
+
+  function card(title, ...children) {
+    return h('section', { class: 'stats-card' }, h('h3', { text: title }), ...children);
+  }
+
+  async function loadStats() {
+    const body = $('statsBody');
+    body.replaceChildren(h('div', { class: 'spinner' }));
+    try {
+      const data = await api(`/stats?days=${state.statsDays}`);
+      const o = data.overview;
+      const f = o.funnel;
+      const parts = [];
+      if (!data.telegram) parts.push(h('div', { class: 'alert', text: '⚠️ Telegram ما زال ما مربوطش: التقارير الأوتوماتيكية ما غاديش توصلك حتى تشغّل set_telegram.py.' }));
+      parts.push(h('div', { class: 'stats-grid' },
+        ...[['زوار', f.visitors], ['فتحو منتوج', f.viewers], ['زادو للسلة', f.cart], ['طلبات', f.valid_orders],
+          ['المداخيل', money(o.revenue)], ['متوسط الطلب', money(o.average_order)], ['نسبة التحويل', f.conversion], ['نسبة الإلغاء (30 يوم)', o.cancel_rate_30d]]
+          .map(([label, value]) => h('div', { class: 'stat' }, h('b', { dir: 'ltr', text: value }), h('span', { text: label })))
+      ));
+      parts.push(card('🛒 القمع: فين كيتوقف الزبون',
+        ...[['زاروا الموقع', f.visitors], ['فتحو منتوج', f.viewers], ['زادو للسلة', f.cart], ['بداو الفورم', f.checkout], ['أكدو الطلب', f.valid_orders]]
+          .map(([label, value]) => {
+            const bar = h('span');
+            bar.style.width = f.visitors ? `${Math.max(2, (100 * value) / f.visitors)}%` : '0%';
+            return h('div', { class: 'funnel-row' }, h('span', { text: label }), h('div', { class: 'funnel-bar' }, bar), h('b', { text: `${value} · ${pct(value, f.visitors)}` }));
+          }),
+        f.checkout > f.valid_orders ? h('p', { class: 'hint', text: `🛑 ${f.checkout - f.valid_orders} بداو الفورم وما كملوش الطلب.` }) : null
+      ));
+      const products = data.products.filter((r) => r.views || r.orders).slice(0, 20);
+      parts.push(card('🛍️ المنتجات', products.length
+        ? table(['المنتوج', 'مشاهدات', 'أشخاص', 'رجعو', 'خرجو بلا سلة', 'للسلة', 'طلبات', 'مداخيل'],
+          products.map((r) => [r.product, r.views, r.unique, r.returning, r.left, r.cart, r.orders, money(r.revenue)]))
+        : h('p', { class: 'hint', text: 'لا توجد مشاهدات فهاد المدة.' })));
+      if (o.sources.length) parts.push(card('📣 منين جاو الزوار', table(['المصدر', 'زوار', 'طلبات'], o.sources.map((x) => [x.label, x.visitors, x.orders]))));
+      if (o.campaigns.length) parts.push(card('🎯 الإعلانات (utm_campaign)', table(['الحملة', 'زوار', 'طلبات'], o.campaigns.map((x) => [x.campaign, x.visitors, x.orders]))));
+      const pills = (items, render) => h('div', { class: 'kv' }, ...items.map((x) => h('span', { text: render(x) })));
+      if (o.devices.length) parts.push(card('📱 الأجهزة', pills(o.devices, (x) => `${x.label}: ${x.visitors}`)));
+      if (o.cities.length) parts.push(card('🏙️ المدن (من الطلبات)', pills(o.cities, (x) => `${x.city}: ${x.orders}`)));
+      if (o.variants.length) parts.push(card('📏 الأحجام / الخيارات المطلوبة', pills(o.variants, (x) => `${x.option}: ×${x.quantity}`)));
+      if (o.statuses_30d.length) parts.push(card('📦 حالة الطلبات (آخر 30 يوم)', pills(o.statuses_30d, (x) => `${x.label}: ${x.orders}`),
+        h('p', { class: 'hint', text: `🔁 زبناء عاودو الشرا فهاد المدة: ${o.repeat_customers}` })));
+      if (o.suspicious.length) parts.push(card('⚠️ طلبات مشكوك فيها (نفس الرقم بزاف)', pills(o.suspicious, (x) => `${x.phone}: ${x.orders} طلبات`)));
+      if (o.searches.length) parts.push(card('🔍 البحث', pills(o.searches, (x) => `${x.query} (${x.count})`),
+        o.empty_searches.length ? h('p', { class: 'hint', text: `❓ ما لقاوش: ${o.empty_searches.map((x) => x.query).join(' · ')}` }) : null));
+      if (o.visit_hours.length || o.order_hours.length) parts.push(card('⏰ أحسن الساعات',
+        h('p', { class: 'hint', text: `زيارات: ${o.visit_hours.map((x) => hourLabel(x.hour)).join(' · ') || '—'}` }),
+        h('p', { class: 'hint', text: `طلبات: ${o.order_hours.map((x) => hourLabel(x.hour)).join(' · ') || '—'}` })));
+      body.replaceChildren(...parts);
+    } catch (error) {
+      body.replaceChildren(h('p', { class: 'empty', text: error.message }));
+    }
+  }
+
+  $('downloadCsvBtn').addEventListener('click', async () => {
+    try {
+      const response = await fetch(`${API}/stats.csv?days=${state.statsDays}`, { headers: { 'X-Amani-CMS': '1' }, credentials: 'same-origin' });
+      if (!response.ok) throw new Error('تعذر تحميل الملف.');
+      const url = URL.createObjectURL(await response.blob());
+      const link = h('a', { href: url, download: `amani-${state.statsDays}d-${new Date().toISOString().slice(0, 10)}.csv` });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
+  [['sendReport6hBtn', '6h'], ['sendReportDailyBtn', 'daily']].forEach(([id, kind]) => {
+    $(id).addEventListener('click', async () => {
+      $(id).disabled = true;
+      try {
+        await api('/report/send', { method: 'POST', body: { kind } });
+        toast('تم إرسال التقرير لـ Telegram ✓', 'success');
+      } catch (error) {
+        toast(error.message, 'error');
+      } finally {
+        $(id).disabled = false;
+      }
+    });
+  });
 
   // On admin.<domain>, the "shop" button goes to the main site.
   if (location.hostname.startsWith('admin.')) {

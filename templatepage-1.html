@@ -2300,6 +2300,14 @@
             <!-- Product cards are loaded dynamically from products-json/. -->
         </div>
 
+        <section class="news-section category-section" id="categorySection" hidden="">
+            <div class="section-header">
+                <h2 class="section-title" id="categoryTitle">CATEGORY</h2>
+                <span class="products-count" id="categoryCount"></span>
+            </div>
+            <div class="products-grid" id="categoryGrid"></div>
+        </section>
+
         <section class="news-section" id="newsSection" hidden="">
             <div class="section-header">
                 <h2 class="section-title">NEWS</h2>
@@ -2670,34 +2678,46 @@
                 .filter((url, index, all) => url && all.indexOf(url) === index);
         }
 
+        // Categories are managed in the CMS (/api/categories). They all sit in one
+        // open "All Products" box; each opens its own page at /c/<id>.
+        let shopCategories = [];
+        let currentCategoryId = '';
+
         async function loadCategories() {
-            const urls = getCategorySourceUrls();
-            let lastError;
+            const response = await fetch('/api/categories', { cache: 'no-store', credentials: 'same-origin' });
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            shopCategories = ((await response.json()).categories || []).filter(c => c && c.id && c.title);
+            if (!shopCategories.length) return [];
+            return [{
+                title: 'All Products',
+                url: '#',
+                order: 1,
+                active: 'no',
+                open: 'yes',
+                bgColor: '#ffffff',
+                color: '#1f1f1f',
+                activeColor: '#0a3a2a',
+                subcategories: shopCategories.map(category => ({
+                    title: category.title,
+                    url: `/c/${encodeURIComponent(category.id)}`,
+                    categoryId: category.id,
+                    active: 'no',
+                    bgColor: '#f9f8f6',
+                    color: '#666666',
+                    activeColor: '#c5a059'
+                }))
+            }];
+        }
 
-            for (const url of urls) {
-                try {
-                    const response = await fetch(url, {
-                        headers: { Accept: 'application/json' },
-                        cache: 'no-store',
-                        credentials: 'same-origin'
-                    });
-                    if (!response.ok) {
-                        throw new Error(`${response.status} ${response.statusText}`);
-                    }
-
-                    const responseText = await response.text();
-                    const categories = normalizeCategories(responseText);
-                    if (!categories.length) {
-                        throw new Error('The categories source returned no usable categories.');
-                    }
-                    return categories;
-                } catch (error) {
-                    lastError = error;
-                    console.warn(`Could not load categories from ${url}`, error);
-                }
+        function openCategoryPage(categoryId) {
+            closeAllSidebars();
+            currentCategoryId = String(categoryId || '');
+            if (!jsonCatalog.loaded) {
+                window.location.href = `/c/${encodeURIComponent(currentCategoryId)}`;
+                return;
             }
-
-            throw lastError || new Error('No categories.json URL is available.');
+            setJsonCatalogPage('category');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function renderCategories(categories) {
@@ -2796,6 +2816,11 @@
                                 hasActiveChild = true;
                             }
                             subA.addEventListener('click', (e) => {
+                                if (sub.categoryId) {
+                                    e.preventDefault();
+                                    openCategoryPage(sub.categoryId);
+                                    return;
+                                }
                                 handleCategoryLink(e, sub.url);
                             });
                             if (subPage) {
@@ -2837,13 +2862,18 @@
         }
 
         loadCategories()
-            .then(renderCategories)
+            .then(categories => {
+                renderCategories(categories);
+                const title = document.querySelector('.sidebar-categories-title');
+                if (title) title.hidden = !categories.length;
+                if (jsonCatalog.loaded && getCatalogPageFromLocation() === 'category') {
+                    setJsonCatalogPage('category', false);
+                }
+            })
             .catch(err => {
-                console.warn('categories.json could not be loaded; using embedded categories.', err);
-                renderCategories(DEFAULT_CATEGORIES.map(category => ({
-                    ...category,
-                    subcategories: category.subcategories.map(subcategory => ({ ...subcategory }))
-                })));
+                console.warn('Categories could not be loaded.', err);
+                const title = document.querySelector('.sidebar-categories-title');
+                if (title) title.hidden = true;
             });
 
         function getCatalogPageFromUrl(url) {
@@ -2855,6 +2885,11 @@
         }
 
         function getCatalogPageFromLocation() {
+            const categoryMatch = window.location.pathname.match(/^\/c\/([^/]+)\/?$/i);
+            if (categoryMatch) {
+                try { currentCategoryId = decodeURIComponent(categoryMatch[1]); } catch (_) { currentCategoryId = categoryMatch[1]; }
+                return 'category';
+            }
             const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
             if (['new', 'news', 'popular', 'offers', 'related'].includes(hash)) {
                 return hash === 'news' ? 'new' : hash;
@@ -3250,93 +3285,106 @@
                 clickCount: 0,
                 order: Number(product.order || 999999),
                 addedAt: String(product.addedAt || ''),
+                categories: Array.isArray(product.categories) ? product.categories.map(String) : [],
                 sourceFile
             };
             return normalized;
         }
 
-        function setProductClickCount(proId, count) {
-            const safeCount = Math.max(0, Number(count) || 0);
-            document.querySelectorAll('[data-clicks-for]').forEach(element => {
-                if (element.getAttribute('data-clicks-for')?.toLowerCase() === String(proId).toLowerCase()) {
-                    const countElement = element.querySelector('.product-click-count');
-                    if (countElement) countElement.textContent = String(safeCount);
-                }
-            });
-            [...jsonCatalog.all, ...jsonCatalog.popular, ...jsonCatalog.related, ...jsonCatalog.offers]
-                .filter(product => String(product.proId).toLowerCase() === String(proId).toLowerCase())
-                .forEach(product => { product.clickCount = safeCount; });
+        // --- PRIVATE SHOP STATISTICS ---
+        // Anonymous: a random visitor id (this browser) and a session id (a visit,
+        // ends after 30 minutes without activity). No name, phone or IP is sent.
+        // Visitors never see any numbers; the owner gets them in Telegram / CMS.
+        const TRACK_SESSION_MINUTES = 30;
+
+        function trackRandomId() {
+            if (window.crypto?.randomUUID) return crypto.randomUUID();
+            return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
         }
 
-        function getProductFingerprintInput() {
-            const navigatorData = [
-                navigator.userAgent,
-                navigator.language,
-                navigator.languages?.join(','),
-                navigator.platform,
-                navigator.hardwareConcurrency,
-                navigator.deviceMemory,
-                screen.width,
-                screen.height,
-                screen.colorDepth,
-                Intl.DateTimeFormat().resolvedOptions().timeZone
-            ].join('|');
-            return navigatorData;
+        function trackStorage(key, value) {
+            try {
+                if (value === undefined) return window.localStorage.getItem(key);
+                window.localStorage.setItem(key, value);
+            } catch (_) { /* private mode */ }
+            return value;
         }
 
-        async function getProductBrowserFingerprint() {
-            const storedKey = 'amani-product-browser-fingerprint';
-            const existing = window.localStorage.getItem(storedKey);
-            if (existing) return existing;
-            const input = getProductFingerprintInput();
-            let fingerprint = input;
-            if (window.crypto?.subtle) {
-                const bytes = new TextEncoder().encode(input);
-                const digest = await crypto.subtle.digest('SHA-256', bytes);
-                fingerprint = [...new Uint8Array(digest)]
-                    .map(byte => byte.toString(16).padStart(2, '0')).join('');
+        function trackSource() {
+            const params = new URLSearchParams(window.location.search);
+            const utm = String(params.get('utm_source') || '').toLowerCase();
+            const campaign = String(params.get('utm_campaign') || '').slice(0, 60);
+            const known = ['facebook', 'instagram', 'whatsapp', 'google', 'tiktok', 'youtube', 'snapchat'];
+            const pick = (text) => known.find(name => text.includes(name)) || '';
+            if (utm) return { src: pick(utm) || (utm === 'fb' || utm === 'ig' ? (utm === 'fb' ? 'facebook' : 'instagram') : 'other'), campaign };
+            if (params.has('fbclid')) return { src: 'facebook', campaign };
+            let referrer = '';
+            try { referrer = document.referrer ? new URL(document.referrer).hostname.toLowerCase() : ''; } catch (_) { referrer = ''; }
+            if (!referrer || referrer === window.location.hostname) return { src: 'direct', campaign };
+            if (referrer.includes('wa.me') || referrer.includes('whatsapp')) return { src: 'whatsapp', campaign };
+            if (/(^|\.)(fb|facebook)\.com$/.test(referrer) || referrer.startsWith('l.facebook') || referrer.startsWith('m.facebook')) return { src: 'facebook', campaign };
+            return { src: pick(referrer) || 'other', campaign };
+        }
+
+        function trackDevice() {
+            const ua = navigator.userAgent || '';
+            if (/ipad|tablet|(android(?!.*mobile))/i.test(ua)) return 'tablet';
+            return /mobi|iphone|android/i.test(ua) ? 'mobile' : 'desktop';
+        }
+
+        function trackIds() {
+            let visitor = trackStorage('amani-visitor');
+            if (!visitor) visitor = trackStorage('amani-visitor', trackRandomId());
+            const now = Date.now();
+            let session = null;
+            try { session = JSON.parse(window.sessionStorage.getItem('amani-session') || 'null'); } catch (_) { session = null; }
+            const isNew = !session || now - Number(session.last || 0) > TRACK_SESSION_MINUTES * 60000;
+            if (isNew) session = { id: trackRandomId(), last: now };
+            session.last = now;
+            try { window.sessionStorage.setItem('amani-session', JSON.stringify(session)); } catch (_) { /* ignore */ }
+            return { v: visitor, s: session.id, isNew };
+        }
+
+        function trackEvent(type, extra = {}) {
+            try {
+                const ids = trackIds();
+                const send = (payload) => {
+                    const body = JSON.stringify(payload);
+                    if (navigator.sendBeacon && navigator.sendBeacon('/api/t', new Blob([body], { type: 'application/json' }))) return;
+                    fetch('/api/t', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+                };
+                if (ids.isNew && type !== 'visit') send({ type: 'visit', v: ids.v, s: ids.s, device: trackDevice(), ...trackSource() });
+                send({ type, v: ids.v, s: ids.s, device: trackDevice(), ...(type === 'visit' ? trackSource() : {}), ...extra });
+            } catch (error) {
+                console.warn('Statistics event skipped.', error);
             }
-            window.localStorage.setItem(storedKey, fingerprint);
-            return fingerprint;
         }
 
-        async function loadProductClickCounts(products) {
-            const ids = [...new Set(products.map(product => String(product.proId || '').trim()).filter(Boolean))];
-            if (!ids.length) return;
-            const query = encodeURIComponent(ids.join(','));
-            const response = await fetch(`/api/product-clicks?ids=${query}`, {
-                cache: 'no-store',
-                credentials: 'same-origin'
-            });
-            if (!response.ok) throw new Error(`Could not load product click counts: ${response.status}`);
-            const payload = await response.json();
-            Object.entries(payload.counts || {}).forEach(([proId, count]) => setProductClickCount(proId, count));
-            if (jsonCatalog.loaded && !getDirectProductIdFromPath()) {
-                setJsonCatalogPage(getCatalogPageFromLocation(), false);
-            }
+        function trackingIdsForOrder() {
+            const ids = trackIds();
+            return { v: ids.v, s: ids.s };
         }
 
-        async function recordProductClick(proId) {
+        const recentProductViews = {};
+        // Kept under its old name: every place that "clicked" a product now records a view.
+        function recordProductClick(proId) {
             const wanted = String(proId || '').trim();
             if (!wanted) return;
-            try {
-                const fingerprint = await getProductBrowserFingerprint();
-                const response = await fetch('/api/product-clicks', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ product_id: wanted, fingerprint })
-                });
-                if (!response.ok) throw new Error(`Click was not recorded: ${response.status}`);
-                const payload = await response.json();
-                if (Number.isFinite(Number(payload.count))) {
-                    setProductClickCount(wanted, payload.count);
-                    if (jsonCatalog.loaded && !getDirectProductIdFromPath()) {
-                        setJsonCatalogPage(getCatalogPageFromLocation(), false);
-                    }
-                }
-            } catch (error) {
-                console.warn('Product click could not be recorded.', error);
+            if (Date.now() - (recentProductViews[wanted] || 0) < 30000) return;
+            recentProductViews[wanted] = Date.now();
+            trackEvent('product_view', { product: wanted });
+        }
+
+        // Popularity order for sorting (the server gives the order only, no numbers).
+        async function loadProductRanking(products) {
+            const response = await fetch('/api/product-rank', { cache: 'no-store', credentials: 'same-origin' });
+            if (!response.ok) throw new Error(`Could not load product ranking: ${response.status}`);
+            const ranking = (await response.json()).ranking || [];
+            const score = new Map(ranking.map((proId, index) => [String(proId).toLowerCase(), ranking.length - index]));
+            [...jsonCatalog.all, ...jsonCatalog.popular, ...jsonCatalog.related, ...jsonCatalog.offers, ...jsonCatalog.new]
+                .forEach(product => { product.clickCount = score.get(String(product.proId).toLowerCase()) || 0; });
+            if (jsonCatalog.loaded && !getDirectProductIdFromPath()) {
+                setJsonCatalogPage(getCatalogPageFromLocation(), false);
             }
         }
 
@@ -3434,11 +3482,6 @@
                     <h3 class="product-title">${jsonEscape(product.title)}</h3>
                     <span class="current-price">${jsonEscape(product.price)} DH</span>
                     <span class="old-price">${oldPrice ? `${jsonEscape(oldPrice)} DH` : ''}</span>
-                    <span class="product-clicks" data-clicks-for="${jsonEscape(product.proId)}" title="Product clicks">
-                        <i class="fa-solid fa-eye" aria-hidden="true"></i>
-                        <span class="product-click-count">${Number(product.clickCount || 0)}</span>
-                        <span class="product-clicks-label">people viewed<br>this product</span>
-                    </span>
                     <button class="buy-btn" onclick="openProductFromButton(this)">ADD TO CART</button>
                 </div>
             `;
@@ -3511,7 +3554,7 @@
         }
 
         function setJsonCatalogPage(page, updateUrl = true) {
-            const validPage = ['home', 'popular', 'offers', 'related', 'new'].includes(page)
+            const validPage = ['home', 'popular', 'offers', 'related', 'new', 'category'].includes(page)
                 ? page
                 : 'home';
             const isHome = validPage === 'home';
@@ -3532,25 +3575,49 @@
             // On the home page, hide Best Offers while no product qualifies.
             offersSection.hidden = isHome ? !jsonCatalog.offers.length : validPage !== 'offers';
             if (newsSection) newsSection.hidden = validPage !== 'new';
+            const categorySection = document.getElementById('categorySection');
+            if (categorySection) categorySection.hidden = validPage !== 'category';
             if (slider) slider.hidden = !isHome;
             if (back) back.hidden = isHome;
             if (whatsNew) whatsNew.hidden = !isHome;
-            document.body.classList.toggle('catalog-page-full', !isHome && validPage !== 'new');
+            document.body.classList.toggle('catalog-page-full', !isHome && validPage !== 'new' && validPage !== 'category');
 
             if (isHome) {
                 renderJsonSection('popular', 0, false);
                 renderJsonSection('related', 0, false);
                 renderJsonSection('offers', 0, false);
+            } else if (validPage === 'category') {
+                renderCategoryPage();
             } else {
                 renderJsonSection(validPage, jsonCatalog.pages[validPage], true);
             }
 
             if (updateUrl) {
-                const nextHash = isHome ? '' : `#${validPage}`;
-                if (window.location.hash !== nextHash) {
-                    window.history.pushState({}, '', `${window.location.pathname}${nextHash}`);
+                const nextUrl = validPage === 'category'
+                    ? `/c/${encodeURIComponent(currentCategoryId)}`
+                    : `/${isHome ? '' : `#${validPage}`}`;
+                if (`${window.location.pathname}${window.location.hash}` !== nextUrl) {
+                    window.history.pushState({}, '', nextUrl);
                 }
             }
+        }
+
+        function renderCategoryPage() {
+            const category = shopCategories.find(c => c.id === currentCategoryId);
+            const title = document.getElementById('categoryTitle');
+            const count = document.getElementById('categoryCount');
+            const grid = document.getElementById('categoryGrid');
+            if (!grid) return;
+            if (title) title.textContent = category ? category.title : 'Category';
+            const products = sortJsonProducts(jsonCatalog.all.filter(product => product.categories.includes(currentCategoryId)));
+            grid.replaceChildren(...products.map(productCardFromJson));
+            if (!products.length) {
+                const empty = document.createElement('p');
+                empty.className = 'catalog-empty-message';
+                empty.textContent = 'Products coming soon. Come back soon!';
+                grid.replaceChildren(empty);
+            }
+            if (count) count.textContent = products.length ? `${products.length} products` : '';
         }
 
         async function hydrateJsonCatalog() {
@@ -3598,7 +3665,7 @@
             // counts is supplementary and must never block the quantity view.
             openDirectProductIfReady();
             try {
-                await loadProductClickCounts(allProducts);
+                await loadProductRanking(allProducts);
             } catch (error) {
                 console.warn('Product click counts could not be loaded.', error);
             }
@@ -3820,6 +3887,16 @@
 
         startSiteTranslation();
 
+        if (trackIds().isNew) trackEvent('visit');
+        let checkoutTracked = false;
+        document.querySelectorAll('#cartForm input').forEach(input => {
+            input.addEventListener('focus', () => {
+                if (checkoutTracked || !Object.keys(cartItems).length) return;
+                checkoutTracked = true;
+                trackEvent('checkout_open');
+            });
+        });
+
         const whatsNewLink = document.querySelector('.whats-new-btn');
         if (whatsNewLink) {
             whatsNewLink.addEventListener('click', (event) => {
@@ -3906,6 +3983,13 @@
 
             const countEl = document.getElementById('productsCount');
             if (countEl) countEl.innerText = `${visibleCount} Products found`;
+
+            // What visitors search for (and do not find) - sent once they stop typing.
+            clearTimeout(filterProducts.trackTimer);
+            filterProducts.trackTimer = setTimeout(() => {
+                const query = searchInput.value.trim();
+                if (query.length >= 2) trackEvent('search', { value: query.slice(0, 80), num: visibleCount });
+            }, 1500);
         }
 
         // --- 4. QUICK SELECTION LOGIC ---
@@ -4231,7 +4315,7 @@
             }
 
             // Count a successful add-to-cart action as a product click too.
-            void recordProductClick(currentQmProduct.id);
+            trackEvent('add_to_cart', { product: currentQmProduct.id });
             const colorSelection = selected.find(item => item.group.toLowerCase().includes('color')) || selected[0];
             const selectedImage = colorSelection?.img || selected.find(item => item.img)?.img || '';
             const cartKey = `${currentQmProduct.id}_${selected.map(item => `${item.group}:${item.option}:${item.priceAdd || 0}`).join('|')}`;
@@ -4262,7 +4346,7 @@
             const host = document.getElementById('siteFooterHost');
             if (!host || host.dataset.loaded) return;
             try {
-                const response = await fetch(new URL('footers-html/footer-main.html', document.baseURI), { cache: 'no-cache' });
+                const response = await fetch('/footers-html/footer-main.html', { cache: 'no-cache' });
                 if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 const footerDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
                 const footer = footerDocument.querySelector('footer');
@@ -4512,7 +4596,8 @@
                 currency: 'MAD',
                 customer: { name, phone, address },
                 items,
-                total: Number(total.toFixed(2))
+                total: Number(total.toFixed(2)),
+                tracking: trackingIdsForOrder()
             };
         }
 

@@ -47,7 +47,14 @@ APP_DIR = Path(__file__).resolve().parent
 # Only these folders (next to the HTML file) are served to visitors.
 # Everything else - app.py, .env, data/, backups - is never reachable.
 PUBLIC_DIRECTORIES = frozenset(
-    {"products-json", "categories-json", "footers-html", "assets", "images"}
+    {
+        "products-json",
+        "categories-json",
+        "footers-html",
+        "templates-html",  # category pages opened from the menu
+        "assets",
+        "images",
+    }
 )
 STATIC_CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",

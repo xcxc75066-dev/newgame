@@ -18,24 +18,25 @@
     "activeColor": "#0a3a2a"
   },
   {
-    "title": "Beauty & Health",
+    "title": "All Products",
     "url": "#",
     "order": 3,
     "active": "no",
+    "open": "yes",
     "bgColor": "#ffffff",
     "color": "#1f1f1f",
     "activeColor": "#0a3a2a",
     "subcategories": [
       {
-        "title": "Skincare",
-        "url": "templates-html/templatepage-2.html",
-        "active": "yes",
+        "title": "Hair Care",
+        "url": "#",
+        "active": "no",
         "bgColor": "#f9f8f6",
         "color": "#666666",
         "activeColor": "#c5a059"
       },
       {
-        "title": "Hair Care",
+        "title": "Skincare",
         "url": "#",
         "active": "no",
         "bgColor": "#f9f8f6",
@@ -49,20 +50,9 @@
         "bgColor": "#f9f8f6",
         "color": "#666666",
         "activeColor": "#c5a059"
-      }
-    ]
-  },
-  {
-    "title": "Sports",
-    "url": "#",
-    "order": 4,
-    "active": "no",
-    "bgColor": "#ffffff",
-    "color": "#1f1f1f",
-    "activeColor": "#0a3a2a",
-    "subcategories": [
+      },
       {
-        "title": "Fitness",
+        "title": "Electronics & Gadgets",
         "url": "#",
         "active": "no",
         "bgColor": "#f9f8f6",
@@ -70,7 +60,7 @@
         "activeColor": "#c5a059"
       },
       {
-        "title": "Running",
+        "title": "Home & Kitchen",
         "url": "#",
         "active": "no",
         "bgColor": "#f9f8f6",
@@ -78,26 +68,7 @@
         "activeColor": "#c5a059"
       },
       {
-        "title": "Outdoor Sports",
-        "url": "#",
-        "active": "no",
-        "bgColor": "#f9f8f6",
-        "color": "#666666",
-        "activeColor": "#c5a059"
-      }
-    ]
-  },
-  {
-    "title": "Cooking",
-    "url": "#",
-    "order": 5,
-    "active": "no",
-    "bgColor": "#ffffff",
-    "color": "#1f1f1f",
-    "activeColor": "#0a3a2a",
-    "subcategories": [
-      {
-        "title": "Cookware",
+        "title": "Sports & Fitness",
         "url": "#",
         "active": "no",
         "bgColor": "#f9f8f6",
@@ -105,15 +76,7 @@
         "activeColor": "#c5a059"
       },
       {
-        "title": "Kitchen Tools",
-        "url": "#",
-        "active": "no",
-        "bgColor": "#f9f8f6",
-        "color": "#666666",
-        "activeColor": "#c5a059"
-      },
-      {
-        "title": "Bakeware",
+        "title": "Car Accessories",
         "url": "#",
         "active": "no",
         "bgColor": "#f9f8f6",

@@ -920,6 +920,11 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         # The storefront HTML is the SPA shell for the root and for exactly
         # one product slug. The browser then resolves that slug against
         # pro-id123 from products-json/productspage-*.json.
+        if path == "/favicon.ico":
+            favicon = self._public_file("assets/favicon.svg")
+            if favicon is not None:
+                self._send_file(favicon, STATIC_CONTENT_TYPES[".svg"], "public, max-age=86400")
+                return
         if path in {"/", "/index.html"} or PRODUCT_ROUTE_PATTERN.fullmatch(path):
             self._serve_html()
             return

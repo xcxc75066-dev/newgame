@@ -1,16 +1,178 @@
 {
   "products": [
     {
-      "id": "CARE1001",
-      "pro-id123": "care1001-bamboo-detangling-comb",
+      "id": "AP1001",
+      "pro-id123": "ap1001-oud-royal-eau-de-parfum",
       "order": 1,
-      "title": "Bamboo Detangling Comb",
-      "brand": "AMANI CARE",
-      "price": 49,
-      "oldPrice": 69,
-      "description": "A gentle bamboo comb for smooth, tangle-free hair.",
-      "image": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-      "sections": ["popular", "related", "offers"],
+      "title": "Oud Royal Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 349,
+      "oldPrice": 449,
+      "description": "Warm oud, saffron and amber. A deep, long-lasting oriental scent for evenings and special occasions.",
+      "image": "https://images.pexels.com/photos/12456283/pexels-photo-12456283.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [
+        {
+          "label": "BEST SELLER",
+          "position": "top-right",
+          "background": "#0A3A2A",
+          "textColor": "#FFFFFF"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/12456283/pexels-photo-12456283.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/12456283/pexels-photo-12456283.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 150
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP1002",
+      "pro-id123": "ap1002-rose-de-taif-eau-de-parfum",
+      "order": 2,
+      "title": "Rose de Taif Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 299,
+      "oldPrice": 379,
+      "description": "Rich Taif rose with soft musk and a touch of pink pepper. Elegant, feminine and easy to wear every day.",
+      "image": "https://images.pexels.com/photos/35824747/pexels-photo-35824747.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [
+        {
+          "label": "NEW",
+          "position": "top-left",
+          "background": "#C5A059",
+          "textColor": "#FFFFFF"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/35824747/pexels-photo-35824747.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/35824747/pexels-photo-35824747.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 120
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP1003",
+      "pro-id123": "ap1003-musk-blanc-eau-de-parfum",
+      "order": 3,
+      "title": "Musk Blanc Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 199,
+      "oldPrice": 259,
+      "description": "Clean white musk with cotton and light florals. Fresh, soft and perfect after a shower.",
+      "image": "https://images.pexels.com/photos/1190829/pexels-photo-1190829.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/1190829/pexels-photo-1190829.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/1190829/pexels-photo-1190829.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 90
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP1004",
+      "pro-id123": "ap1004-amber-night-eau-de-parfum",
+      "order": 4,
+      "title": "Amber Night Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 279,
+      "oldPrice": 349,
+      "description": "Amber, vanilla and tonka bean wrapped in a smoky warmth. A cosy signature for cold nights.",
+      "image": "https://images.pexels.com/photos/30990130/pexels-photo-30990130.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/30990130/pexels-photo-30990130.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/30990130/pexels-photo-30990130.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 110
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP1005",
+      "pro-id123": "ap1005-jasmine-atlas-eau-de-parfum",
+      "order": 5,
+      "title": "Jasmine Atlas Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 249,
+      "oldPrice": 319,
+      "description": "Moroccan jasmine and orange blossom over a light woody base. Bright, floral and full of sunshine.",
+      "image": "https://images.pexels.com/photos/7814959/pexels-photo-7814959.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
       "badges": [
         {
           "label": "BEST OFFER",
@@ -21,144 +183,55 @@
       ],
       "colors": [
         {
-          "name": "Style",
+          "name": "Size",
           "options": [
             {
-              "name": "Natural Bamboo",
-              "img": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/7814959/pexels-photo-7814959.jpeg?auto=compress&cs=tinysrgb&w=800",
               "soldOut": false,
               "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/7814959/pexels-photo-7814959.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 100
             }
           ]
         }
       ]
     },
     {
-      "id": "CARE1002",
-      "pro-id123": "care1002-daily-hair-care-set",
-      "order": 2,
-      "title": "Daily Hair Care Set",
-      "brand": "AMANI CARE",
-      "price": 129,
-      "oldPrice": 159,
-      "description": "A simple daily hair care set with a comb and nourishing essentials.",
-      "image": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-      "sections": ["popular", "related", "offers"],
-      "badges": [
-        {
-          "label": "NEW",
-          "position": "top-left",
-          "background": "#2F80ED",
-          "textColor": "#FFFFFF"
-        },
-        {
-          "label": "BEST OFFER",
-          "position": "bottom-right",
-          "background": "#C5A059",
-          "textColor": "#111111"
-        }
+      "id": "AP1006",
+      "pro-id123": "ap1006-cedar-sport-eau-de-toilette",
+      "order": 6,
+      "title": "Cedar Sport Eau de Toilette",
+      "brand": "AMANI PARFUMS",
+      "price": 179,
+      "oldPrice": 229,
+      "description": "Fresh citrus, mint and cedar wood. Light and energetic for the gym, work and hot days.",
+      "image": "https://images.pexels.com/photos/8361540/pexels-photo-8361540.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
       ],
-      "colors": [
-        {
-          "name": "Set",
-          "options": [
-            {
-              "name": "Complete Set",
-              "img": "7210.jpg?semt=ais_hybrid&w=740&q=80",
-              "soldOut": false,
-              "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1003",
-      "pro-id123": "care1003-scalp-massage-comb",
-      "order": 3,
-      "title": "Scalp Massage Comb",
-      "brand": "AMANI CARE",
-      "price": 39,
-      "oldPrice": 55,
-      "description": "A comfortable massage comb designed to refresh the scalp during washing.",
-      "image": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-      "sections": ["popular", "related", "offers"],
-      "badges": [
-        {
-          "label": "BEST SELLER",
-          "position": "top-left",
-          "background": "#111111",
-          "textColor": "#FFFFFF"
-        }
-      ],
-      "colors": [
-        {
-          "name": "Color",
-          "options": [
-            {
-              "name": "Black",
-              "img": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7202.jpg?semt=ais_hybrid&w=740&q=80",
-              "soldOut": false,
-              "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1004",
-      "pro-id123": "care1004-nourishing-hair-oil",
-      "order": 4,
-      "title": "Nourishing Hair Oil",
-      "brand": "AMANI CARE",
-      "price": 79,
-      "oldPrice": 99,
-      "description": "A lightweight nourishing hair oil for soft and shiny-looking hair.",
-      "image": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7176.jpg?semt=ais_hybrid&w=740&q=80",
-      "sections": ["popular", "related", "offers"],
       "badges": [],
       "colors": [
         {
           "name": "Size",
           "options": [
             {
-              "name": "100 ml",
-              "img": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7176.jpg?semt=ais_hybrid&w=740&q=80",
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/8361540/pexels-photo-8361540.jpeg?auto=compress&cs=tinysrgb&w=800",
               "soldOut": false,
               "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1005",
-      "pro-id123": "care1005-moisturizing-hair-mask",
-      "order": 5,
-      "title": "Moisturizing Hair Mask",
-      "brand": "AMANI CARE",
-      "price": 89,
-      "oldPrice": 85,
-      "description": "A rich moisturizing mask for a softer, smoother hair care routine.",
-      "image": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7178.jpg?semt=ais_hybrid&w=740&q=80",
-      "sections": ["related", "offers"],
-      "badges": [
-        {
-          "label": "4.6⭐",
-          "position": "bottom-left",
-          "background": "#2F80ED",
-          "textColor": "#FFFFFF"
-        }
-      ],
-      "colors": [
-        {
-          "name": "Size",
-          "options": [
+            },
             {
-              "name": "250 g",
-              "img": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7178.jpg?semt=ais_hybrid&w=740&q=80",
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/8361540/pexels-photo-8361540.jpeg?auto=compress&cs=tinysrgb&w=800",
               "soldOut": false,
-              "priceAdd": 0
+              "priceAdd": 80
             }
           ]
         }

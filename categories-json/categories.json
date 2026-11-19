@@ -28,6 +28,14 @@
     "activeColor": "#0a3a2a",
     "subcategories": [
       {
+        "title": "Perfumes",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
         "title": "Hair Care",
         "url": "#",
         "active": "no",
@@ -69,14 +77,6 @@
       },
       {
         "title": "Sports & Fitness",
-        "url": "#",
-        "active": "no",
-        "bgColor": "#f9f8f6",
-        "color": "#666666",
-        "activeColor": "#c5a059"
-      },
-      {
-        "title": "Car Accessories",
         "url": "#",
         "active": "no",
         "bgColor": "#f9f8f6",

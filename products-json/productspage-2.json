@@ -1,19 +1,217 @@
 {
   "products": [
     {
-      "id": "CARE1001",
-      "pro-id123": "care1001-bamboo-detangling-comb",
+      "id": "AP2001",
+      "pro-id123": "ap2001-oud-intense-eau-de-parfum",
       "order": 1,
-      "title": "Bamboo Detangling Comb",
-      "brand": "AMANI CARE",
-      "price": 49,
-      "oldPrice": 69,
-      "description": "A gentle bamboo comb for smooth, tangle-free hair.",
-      "image": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-      "sections": ["popular", "related", "offers"],
+      "title": "Oud Intense Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 399,
+      "oldPrice": 499,
+      "description": "Our strongest oud: smoky agarwood, leather and patchouli. A few sprays last all day.",
+      "image": "https://images.pexels.com/photos/12402368/pexels-photo-12402368.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
       "badges": [
         {
-          "label": "BEST OFFER",
+          "label": "-20%",
+          "position": "top-left",
+          "background": "#C5A059",
+          "textColor": "#FFFFFF"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/12402368/pexels-photo-12402368.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/12402368/pexels-photo-12402368.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 170
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP2002",
+      "pro-id123": "ap2002-vanilla-silk-eau-de-parfum",
+      "order": 2,
+      "title": "Vanilla Silk Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 229,
+      "oldPrice": 299,
+      "description": "Creamy Madagascar vanilla with a hint of caramel and white flowers. Sweet and comforting.",
+      "image": "https://images.pexels.com/photos/29611647/pexels-photo-29611647.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/29611647/pexels-photo-29611647.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/29611647/pexels-photo-29611647.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP2003",
+      "pro-id123": "ap2003-orange-blossom-eau-de-parfum",
+      "order": 3,
+      "title": "Orange Blossom Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 219,
+      "oldPrice": 279,
+      "description": "Neroli and orange blossom from Moroccan gardens with a soft musky trail.",
+      "image": "https://images.pexels.com/photos/30970926/pexels-photo-30970926.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/30970926/pexels-photo-30970926.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/30970926/pexels-photo-30970926.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 90
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP2004",
+      "pro-id123": "ap2004-black-amber-eau-de-parfum",
+      "order": 4,
+      "title": "Black Amber Eau de Parfum",
+      "brand": "AMANI PARFUMS",
+      "price": 329,
+      "oldPrice": 399,
+      "description": "Dark amber, incense and cardamom. Bold, warm and mysterious.",
+      "image": "https://images.pexels.com/photos/36955843/pexels-photo-36955843.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/36955843/pexels-photo-36955843.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/36955843/pexels-photo-36955843.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 130
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP2005",
+      "pro-id123": "ap2005-fresh-citrus-eau-de-toilette",
+      "order": 5,
+      "title": "Fresh Citrus Eau de Toilette",
+      "brand": "AMANI PARFUMS",
+      "price": 149,
+      "oldPrice": 199,
+      "description": "Lemon, bergamot and green tea. A light everyday freshness at a small price.",
+      "image": "https://images.pexels.com/photos/8361493/pexels-photo-8361493.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [
+        {
+          "label": "-25%",
+          "position": "top-left",
+          "background": "#C5A059",
+          "textColor": "#FFFFFF"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Size",
+          "options": [
+            {
+              "name": "50 ml",
+              "img": "https://images.pexels.com/photos/8361493/pexels-photo-8361493.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 0
+            },
+            {
+              "name": "100 ml",
+              "img": "https://images.pexels.com/photos/8361493/pexels-photo-8361493.jpeg?auto=compress&cs=tinysrgb&w=800",
+              "soldOut": false,
+              "priceAdd": 70
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AP2006",
+      "pro-id123": "ap2006-musk-and-rose-gift-box",
+      "order": 6,
+      "title": "Musk and Rose Gift Box",
+      "brand": "AMANI PARFUMS",
+      "price": 449,
+      "oldPrice": 599,
+      "description": "Two 50 ml perfumes in a gift box: Musk Blanc and Rose de Taif. A perfect present.",
+      "image": "https://images.pexels.com/photos/30970927/pexels-photo-30970927.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "sections": [
+        "popular",
+        "related",
+        "offers"
+      ],
+      "badges": [
+        {
+          "label": "GIFT",
           "position": "top-right",
           "background": "#0A3A2A",
           "textColor": "#FFFFFF"
@@ -21,142 +219,11 @@
       ],
       "colors": [
         {
-          "name": "Style",
-          "options": [
-            {
-              "name": "Natural Bamboo",
-              "img": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-              "soldOut": false,
-              "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1002",
-      "pro-id123": "care1002-daily-hair-care-set",
-      "order": 2,
-      "title": "Daily Hair Care Set",
-      "brand": "AMANI CARE",
-      "price": 129,
-      "oldPrice": 159,
-      "description": "A simple daily hair care set with a comb and nourishing essentials.",
-      "image": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-      "sections": ["popular", "related", "offers"],
-      "badges": [
-        {
-          "label": "NEW",
-          "position": "top-left",
-          "background": "#2F80ED",
-          "textColor": "#FFFFFF"
-        },
-        {
-          "label": "BEST OFFER",
-          "position": "bottom-right",
-          "background": "#C5A059",
-          "textColor": "#111111"
-        }
-      ],
-      "colors": [
-        {
-          "name": "Set",
-          "options": [
-            {
-              "name": "Complete Set",
-              "img": "7210.jpg?semt=ais_hybrid&w=740&q=80",
-              "soldOut": false,
-              "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1003",
-      "pro-id123": "care1003-scalp-massage-comb",
-      "order": 3,
-      "title": "Scalp Massage Comb",
-      "brand": "AMANI CARE",
-      "price": 39,
-      "oldPrice": 55,
-      "description": "A comfortable massage comb designed to refresh the scalp during washing.",
-      "image": "https://ik.imagekit.io/jpzr7nxy6/img_1786866963855_TTtsNwllR.jpg?tr=f-auto,q-80",
-      "sections": ["popular", "related", "offers"],
-      "badges": [
-        {
-          "label": "BEST SELLER",
-          "position": "top-left",
-          "background": "#111111",
-          "textColor": "#FFFFFF"
-        }
-      ],
-      "colors": [
-        {
-          "name": "Color",
-          "options": [
-            {
-              "name": "Black",
-              "img": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7202.jpg?semt=ais_hybrid&w=740&q=80",
-              "soldOut": false,
-              "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1004",
-      "pro-id123": "care1004-nourishing-hair-oil",
-      "order": 4,
-      "title": "Nourishing Hair Oil",
-      "brand": "AMANI CARE",
-      "price": 79,
-      "oldPrice": 99,
-      "description": "A lightweight nourishing hair oil for soft and shiny-looking hair.",
-      "image": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7176.jpg?semt=ais_hybrid&w=740&q=80",
-      "sections": ["popular", "related", "offers"],
-      "badges": [],
-      "colors": [
-        {
           "name": "Size",
           "options": [
             {
-              "name": "100 ml",
-              "img": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7176.jpg?semt=ais_hybrid&w=740&q=80",
-              "soldOut": false,
-              "priceAdd": 0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "CARE1005",
-      "pro-id123": "care1005-moisturizing-hair-mask",
-      "order": 5,
-      "title": "Moisturizing Hair Mask",
-      "brand": "AMANI CARE",
-      "price": 89,
-      "oldPrice": 85,
-      "description": "A rich moisturizing mask for a softer, smoother hair care routine.",
-      "image": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7178.jpg?semt=ais_hybrid&w=740&q=80",
-      "sections": ["related", "offers"],
-      "badges": [
-        {
-          "label": "4.6⭐",
-          "position": "bottom-left",
-          "background": "#2F80ED",
-          "textColor": "#FFFFFF"
-        }
-      ],
-      "colors": [
-        {
-          "name": "Size",
-          "options": [
-            {
-              "name": "250 g",
-              "img": "https://img.freepik.com/premium-photo/hair-care-products-comb-table-top-view_441923-7178.jpg?semt=ais_hybrid&w=740&q=80",
+              "name": "2 x 50 ml",
+              "img": "https://images.pexels.com/photos/30970927/pexels-photo-30970927.jpeg?auto=compress&cs=tinysrgb&w=800",
               "soldOut": false,
               "priceAdd": 0
             }

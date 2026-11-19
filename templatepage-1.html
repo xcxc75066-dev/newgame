@@ -585,7 +585,6 @@
         .external-footer-frame {
             display: block;
             width: 100%;
-            min-height: 520px;
             border: 0;
             margin: 0;
             background: transparent;
@@ -2256,9 +2255,9 @@
 
     </main>
 
-    <!-- Footer is maintained in its own HTML file. -->
-    <iframe class="external-footer-frame" src="footers-html/footer-main.html" title="Amani Market footer" loading="lazy">
-    </iframe>
+    <!-- Footer is maintained in its own file (footers-html/footer-main.html).
+         It is placed straight into the page, so it always shows at full height. -->
+    <div class="external-footer-frame" id="siteFooterHost"></div>
 
     <!-- Floating WhatsApp -->
     <a href="https://wa.me/212754708678" class="whatsapp-float" target="_blank">
@@ -2445,8 +2444,8 @@
                 color: '#1f1f1f',
                 activeColor: '#0a3a2a',
                 subcategories: [
-                    'Hair Care', 'Skincare', 'Personal Care', 'Electronics & Gadgets',
-                    'Home & Kitchen', 'Sports & Fitness', 'Car Accessories'
+                    'Perfumes', 'Hair Care', 'Skincare', 'Personal Care',
+                    'Electronics & Gadgets', 'Home & Kitchen', 'Sports & Fitness'
                 ].map(title => ({
                     title,
                     url: '#',
@@ -3997,6 +3996,44 @@
             if (typeof saveCartToStorage === 'function') saveCartToStorage();
         }
 
+        // --- FOOTER ---
+        // The footer's own styles stay inside it (shadow DOM): they cannot change
+        // the shop, and the shop's styles cannot break the footer.
+        const FOOTER_DARK_CSS = `
+            :host(.dark) {
+                --bg-color: #111827;
+                --text-main: #e5e7eb;
+                --text-muted: #a7b0bd;
+                --border-color: #334155;
+                --primary-dark: #c5a059;
+            }`;
+
+        async function loadSiteFooter() {
+            const host = document.getElementById('siteFooterHost');
+            if (!host || host.shadowRoot) return;
+            try {
+                const response = await fetch(new URL('footers-html/footer-main.html', document.baseURI), { cache: 'no-cache' });
+                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                const footerDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
+                const footer = footerDocument.querySelector('footer');
+                if (!footer) throw new Error('footer-main.html has no <footer> element.');
+                const css = [...footerDocument.querySelectorAll('style')]
+                    .map(style => style.textContent)
+                    .join('\n')
+                    .replace(/:root\b/g, ':host')
+                    .replace(/(^|[\s,}])body(?=[\s,{])/g, '$1:host');
+                const root = host.attachShadow({ mode: 'open' });
+                const style = document.createElement('style');
+                style.textContent = `:host { display: block; }\n${css}\n${FOOTER_DARK_CSS}`;
+                root.append(style, document.importNode(footer, true));
+                host.classList.toggle('dark', document.body.classList.contains('dark-mode'));
+            } catch (error) {
+                console.warn('The footer could not be loaded.', error);
+            }
+        }
+
+        loadSiteFooter();
+
         // --- 5. CART & SIDEBAR SYSTEM ---
         let cartItems = {};
         let cartItemsExpanded = false;
@@ -4008,6 +4045,7 @@
 
         function applyTheme(isDark) {
             document.body.classList.toggle('dark-mode', isDark);
+            document.getElementById('siteFooterHost')?.classList.toggle('dark', isDark);
             const themeButton = document.getElementById('themeToggleBtn');
             if (themeButton) {
                 themeButton.innerHTML = isDark

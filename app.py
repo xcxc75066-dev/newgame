@@ -754,7 +754,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         for key, value in headers.items():
             self.send_header(key, value)
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     def _send_error(self, status: HTTPStatus, message: str) -> None:
         self._send_json({"ok": False, "message": message}, status)
@@ -796,7 +796,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     def _ip_is_allowed(self, client_ip: str) -> bool:
         """current-ip.html holds one allowed IP per line (lines starting with # are ignored)."""
@@ -843,7 +843,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(body)
+        self._write_body(body)
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -853,6 +853,15 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         for key, value in self._origin_headers().items():
             self.send_header(key, value)
         self.end_headers()
+
+    def _write_body(self, body: bytes) -> None:
+        # HEAD gets the same headers as GET, without the body
+        # (used by WhatsApp/Facebook link previews and uptime checkers).
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_HEAD(self) -> None:
+        self.do_GET()
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

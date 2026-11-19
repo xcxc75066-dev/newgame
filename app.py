@@ -2,8 +2,8 @@
 Amani Market - Professional order receiver
 ==========================================
 
-This file intentionally uses only Python's standard library. Save it as
-``amani_order_server.py`` before running it.
+This file intentionally uses only Python's standard library.
+Secrets go in a .env file next to it (see .env.example).
 
 The modified HTML sends orders to:
     POST /api/orders
@@ -15,14 +15,17 @@ file itself, so the browser and API use the same origin.
 from __future__ import annotations
 
 import argparse
+import hmac
+import html
+import ipaddress
 import json
 import logging
 import os
 import re
 import sqlite3
+import threading
 import uuid
 import urllib.request
-import urllib.error
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -39,53 +42,113 @@ ALLOWED_STATUSES = frozenset(
     {"pending", "confirmed", "processing", "shipped", "delivered", "cancelled"}
 )
 PRODUCT_ROUTE_PATTERN = re.compile(r"^/p/[^/]+/?$", re.IGNORECASE)
+APP_DIR = Path(__file__).resolve().parent
+
+# Only these folders (next to the HTML file) are served to visitors.
+# Everything else - app.py, .env, data/, backups - is never reachable.
+PUBLIC_DIRECTORIES = frozenset(
+    {"products-json", "categories-json", "footers-html", "assets", "images"}
+)
+STATIC_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+}
+
+
+def load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE lines from a .env file without overriding real env vars."""
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip().removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
 
 # ---------------------------------------------------------
 # إعدادات بوت تيليجرام
-# Keep credentials outside the source file (Hybrid approach).
+# The token lives only in .env (or the real environment), never in this file.
 # ---------------------------------------------------------
-TELEGRAM_BOT_TOKEN = os.getenv("AMANI_TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("AMANI_TELEGRAM_CHAT_ID", "").strip()
-
 def send_telegram_notification(order: dict[str, Any]) -> None:
-    """Send order details to the specified Telegram bot."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    """Send order details to the configured Telegram chat. Never raises."""
+    token = os.getenv("AMANI_TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("AMANI_TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
         LOGGER.warning(
             "Telegram notification skipped: AMANI_TELEGRAM_BOT_TOKEN or "
             "AMANI_TELEGRAM_CHAT_ID is not configured."
         )
         return
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
-    items_text = "\n".join(
-        [f"▪️ {item['quantity']}x {item['title']} ({item['line_total']} MAD)" for item in order["items"]]
-    )
+    esc = html.escape
 
+    def describe(item: dict[str, Any]) -> str:
+        variants = ", ".join(
+            f"{variant.get('group', '')}: {variant.get('option', '')}".strip(": ")
+            for variant in item.get("variants") or []
+        )
+        suffix = f" [{esc(variants)}]" if variants else ""
+        return f"▪️ {item['quantity']}x {esc(item['title'])}{suffix} ({item['line_total']} MAD)"
+
+    items_text = "\n".join(describe(item) for item in order["items"])
     message = (
-        f"🛒 <b>طلب جديد! ({order['order_number']})</b>\n\n"
-        f"👤 <b>الزبون:</b> {order['customer']['name']}\n"
-        f"📞 <b>الهاتف:</b> <code>{order['customer']['phone']}</code>\n"
-        f"📍 <b>العنوان:</b> {order['customer']['address']}\n\n"
+        f"🛒 <b>طلب جديد! ({esc(order['order_number'])})</b>\n\n"
+        f"👤 <b>الزبون:</b> {esc(order['customer']['name'])}\n"
+        f"📞 <b>الهاتف:</b> <code>{esc(order['customer']['phone'])}</code>\n"
+        f"📍 <b>العنوان:</b> {esc(order['customer']['address'])}\n\n"
         f"🛍️ <b>المنتجات:</b>\n{items_text}\n\n"
-        f"💰 <b>المجموع:</b> {order['total']} {order['currency']}\n"
-        f"🌐 <b>المصدر:</b> {order['channel']}"
+        f"💰 <b>المجموع:</b> {esc(order['total'])} {esc(order['currency'])}\n"
+        f"🌐 <b>المصدر:</b> {esc(order['channel'])}"
     )
-
-    payload = json.dumps({
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }).encode("utf-8")
-
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-
+    payload = json.dumps(
+        {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
     try:
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(request, timeout=10) as response:
             if response.status == 200:
-                LOGGER.info("Telegram notification sent successfully.")
-    except urllib.error.URLError as e:
-        LOGGER.error(f"Failed to send Telegram notification: {e}")
+                LOGGER.info("Telegram notification sent for %s.", order["order_number"])
+    except Exception as exc:  # noqa: BLE001 - a notification must never break an order
+        # Do not log the exception text: it can contain the bot URL with the token.
+        LOGGER.error(
+            "Failed to send Telegram notification for %s (%s).",
+            order["order_number"],
+            type(exc).__name__,
+        )
+
+
+def notify_order_in_background(order: dict[str, Any]) -> None:
+    """The customer gets their answer immediately; Telegram is sent afterwards."""
+    threading.Thread(
+        target=send_telegram_notification, args=(order,), daemon=True
+    ).start()
 # ---------------------------------------------------------
 
 
@@ -159,7 +222,117 @@ def normalise_variants(value: Any) -> list[dict[str, str]]:
             variants.append({"group": group, "option": option})
     return variants
 
-def validate_order_payload(payload: dict[str, Any]) -> dict[str, Any]:
+
+def _same_name(first: Any, second: Any) -> bool:
+    return " ".join(str(first or "").split()).casefold() == " ".join(
+        str(second or "").split()
+    ).casefold()
+
+
+class ProductCatalog:
+    """The source of truth for prices: the same products-json files the shop shows.
+
+    Customers can edit anything their browser sends, so the server never trusts a
+    price from the request. It looks the product up here instead.
+    """
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self._lock = threading.Lock()
+        self._signature: tuple[tuple[str, int, int], ...] | None = None
+        self._products: dict[str, dict[str, Any]] = {}
+
+    def _current_signature(self) -> tuple[tuple[str, int, int], ...]:
+        if not self.directory.is_dir():
+            return ()
+        signature = []
+        for path in sorted(self.directory.glob("*.json")):
+            stat = path.stat()
+            signature.append((path.name, stat.st_mtime_ns, stat.st_size))
+        return tuple(signature)
+
+    def _reload_if_changed(self) -> None:
+        signature = self._current_signature()
+        if signature == self._signature:
+            return
+        products: dict[str, dict[str, Any]] = {}
+        for name, _, _ in signature:
+            path = self.directory / name
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                LOGGER.exception("Could not read product file %s", path)
+                continue
+            entries = data.get("products") if isinstance(data, dict) else data
+            for product in entries if isinstance(entries, list) else []:
+                if not isinstance(product, dict):
+                    continue
+                # Same id rules as normalizeJsonProduct() in the storefront HTML.
+                keys = {
+                    str(product.get(key) or "").strip()
+                    for key in ("pro-id123", "proId", "pro_id", "id")
+                }
+                for key in keys - {""}:
+                    products.setdefault(key, product)
+        self._products = products
+        self._signature = signature
+        LOGGER.info("Product catalog loaded: %s product ids.", len(products))
+
+    def find(self, product_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            self._reload_if_changed()
+            return self._products.get(product_id.strip()) if product_id else None
+
+
+def price_item_from_catalog(
+    product: dict[str, Any], requested: list[dict[str, str]], index: int
+) -> tuple[int, list[dict[str, Any]]]:
+    """Return (unit price in cents, variants) using only the catalog's numbers."""
+    unit_cents = cents(product.get("price"), f"items[{index}].price")
+    groups = [group for group in product.get("colors") or [] if isinstance(group, dict)]
+    if not groups:
+        # The storefront shows a dummy "Color: Default" choice for such products.
+        return unit_cents, [dict(variant, priceAdd=0) for variant in requested]
+
+    chosen: list[dict[str, Any]] = []
+    for group in groups:
+        matches = [v for v in requested if _same_name(v["group"], group.get("name"))]
+        if len(matches) != 1:
+            raise OrderValidationError(
+                f"items[{index}]: please choose one {group.get('name') or 'option'}."
+            )
+        option = next(
+            (
+                option
+                for option in group.get("options") or []
+                if isinstance(option, dict) and _same_name(option.get("name"), matches[0]["option"])
+            ),
+            None,
+        )
+        if option is None:
+            raise OrderValidationError(
+                f"items[{index}]: this option is no longer available. Please refresh the page."
+            )
+        if option.get("soldOut"):
+            raise OrderValidationError(
+                f"items[{index}]: {option.get('name')} is sold out."
+            )
+        try:
+            extra = Decimal(str(option.get("priceAdd") or 0)).quantize(MONEY_QUANTUM)
+        except (InvalidOperation, ValueError):
+            extra = Decimal(0)
+        unit_cents += int(extra * 100)
+        chosen.append(
+            {"group": str(group.get("name") or ""), "option": str(option.get("name") or ""), "priceAdd": float(extra)}
+        )
+    if unit_cents < 0:
+        raise OrderValidationError(f"items[{index}] has an invalid price.")
+    return unit_cents, chosen
+
+
+def validate_order_payload(
+    payload: dict[str, Any], catalog: ProductCatalog | None = None
+) -> dict[str, Any]:
     customer = json_object(payload.get("customer"))
     items_input = payload.get("items")
     if not isinstance(items_input, list) or not items_input:
@@ -194,7 +367,17 @@ def validate_order_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if quantity < 1 or quantity > 999:
             raise OrderValidationError(f"items[{index}].quantity must be between 1 and 999.")
 
-        unit_price_cents = cents(item.get("unit_price"), f"items[{index}].unit_price")
+        variants: list[dict[str, Any]] = normalise_variants(item.get("variants"))
+        if catalog is None:
+            unit_price_cents = cents(item.get("unit_price"), f"items[{index}].unit_price")
+        else:
+            product = catalog.find(product_id)
+            if product is None:
+                raise OrderValidationError(
+                    f"items[{index}] ({title}) is no longer available. Please refresh the page."
+                )
+            title = clean_text(product.get("title") or title, f"items[{index}].title", max_length=240)
+            unit_price_cents, variants = price_item_from_catalog(product, variants, index)
         line_total_cents = quantity * unit_price_cents
         calculated_total += line_total_cents
         items.append(
@@ -202,7 +385,7 @@ def validate_order_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "product_id": product_id,
                 "title": title,
                 "image": image,
-                "variants": normalise_variants(item.get("variants")),
+                "variants": variants,
                 "quantity": quantity,
                 "unit_price_cents": unit_price_cents,
                 "line_total_cents": line_total_cents,
@@ -211,11 +394,14 @@ def validate_order_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     received_total_cents = cents(payload.get("total"), "total")
     if abs(received_total_cents - calculated_total) > 1:
-        raise OrderValidationError("The order total does not match its items.")
+        # Either the prices changed since the page was opened, or someone edited them.
+        raise OrderValidationError(
+            "Prices have changed since you opened the page. Please refresh and try again."
+        )
 
     return {
         "channel": channel,
-        "currency": optional_text(payload.get("currency"), max_length=8).upper() or "MAD",
+        "currency": "MAD",
         "customer": customer_data,
         "items": items,
         "total_cents": calculated_total,
@@ -229,6 +415,7 @@ class ServerConfig:
     html_file: Path
     admin_token: str
     allowed_origins: tuple[str, ...]
+    behind_cloudflare: bool = False
     max_body_bytes: int = MAX_JSON_BYTES
 
     @classmethod
@@ -237,21 +424,29 @@ class ServerConfig:
         origins = tuple(origin.strip() for origin in allowed.split(",") if origin.strip())
         
         port_env = os.getenv("PORT") or os.getenv("AMANI_PORT", "5000")
-        
+
+        def app_path(value: str) -> Path:
+            # Relative paths are relative to this file, not to wherever it was started from.
+            path = Path(value)
+            return path if path.is_absolute() else APP_DIR / path
+
         return cls(
             host=args.host or os.getenv("AMANI_HOST", "0.0.0.0"),
             port=args.port or int(port_env),
-            db_path=Path(args.db or os.getenv("AMANI_DB_PATH", "data/amani_orders.sqlite3")),
-            html_file=Path(
+            db_path=app_path(args.db or os.getenv("AMANI_DB_PATH", "data/amani_orders.sqlite3")),
+            html_file=app_path(
                 args.html or os.getenv("AMANI_HTML_FILE", "templatepage-1.html")
             ),
             admin_token=os.getenv("AMANI_ADMIN_TOKEN", "").strip(),
             allowed_origins=origins,
+            behind_cloudflare=os.getenv("AMANI_BEHIND_CLOUDFLARE", "").strip().lower()
+            in {"1", "true", "yes"},
         )
 
 class OrderStore:
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, catalog: ProductCatalog | None = None) -> None:
         self.database_path = database_path
+        self.catalog = catalog
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialise()
 
@@ -349,7 +544,7 @@ class OrderStore:
         }
 
     def create_order(self, payload: dict[str, Any], client_ip: str) -> dict[str, Any]:
-        order = validate_order_payload(payload)
+        order = validate_order_payload(payload, self.catalog)
         order_id = str(uuid.uuid4())
         order_number = self._order_number()
         timestamp = utc_now()
@@ -507,14 +702,32 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
     server_version = "AmaniOrderServer/1.0"
 
     def _get_client_ip(self) -> str:
-        """جلب الأيبي الحقيقي ديال الزبون"""
-        if "CF-Connecting-IP" in self.headers:
-            return self.headers["CF-Connecting-IP"].strip()
-        if "X-Forwarded-For" in self.headers:
-            return self.headers["X-Forwarded-For"].split(",")[0].strip()
-        if "X-Real-IP" in self.headers:
-            return self.headers["X-Real-IP"].strip()
-        return self.client_address[0]
+        """جلب الأيبي الحقيقي ديال الزبون
+
+        Forwarding headers are only believed when the request came from a proxy on
+        this same machine (Caddy/Nginx). Anyone else could simply type them.
+        """
+        peer = self.client_address[0]
+        try:
+            from_local_proxy = ipaddress.ip_address(peer).is_loopback
+        except ValueError:
+            from_local_proxy = False
+        if not from_local_proxy:
+            return peer
+
+        candidates: list[str] = []
+        if self.server.config.behind_cloudflare:
+            candidates.append(self.headers.get("CF-Connecting-IP", ""))
+        # The local proxy appends the real peer address as the LAST entry.
+        candidates.append(self.headers.get("X-Forwarded-For", "").split(",")[-1])
+        candidates.append(self.headers.get("X-Real-IP", ""))
+        for candidate in candidates:
+            candidate = candidate.strip()
+            try:
+                return str(ipaddress.ip_address(candidate))
+            except ValueError:
+                continue
+        return peer
 
     def log_message(self, format: str, *args: Any) -> None:
         LOGGER.info("%s - %s", self._get_client_ip(), format % args)
@@ -565,7 +778,55 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         supplied = self.headers.get("Authorization", "")
         if not expected or not supplied.startswith("Bearer "):
             return False
-        return supplied.removeprefix("Bearer ").strip() == expected
+        return hmac.compare_digest(
+            supplied.removeprefix("Bearer ").strip().encode("utf-8"),
+            expected.encode("utf-8"),
+        )
+
+    def _send_file(self, path: Path, content_type: str, cache_control: str) -> None:
+        try:
+            body = path.read_bytes()
+        except OSError:
+            LOGGER.exception("Error reading file %s", path)
+            self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Error reading file.")
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", cache_control)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _ip_is_allowed(self, client_ip: str) -> bool:
+        """current-ip.html holds one allowed IP per line (lines starting with # are ignored)."""
+        ip_file = self.server.config.html_file.parent / "current-ip.html"
+        try:
+            lines = ip_file.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            LOGGER.exception("Error reading current-ip.html")
+            return False
+        allowed = {line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
+        return client_ip in allowed
+
+    def _public_file(self, relative: str) -> Path | None:
+        """Map a URL path to a file inside PUBLIC_DIRECTORIES, or None."""
+        parts = relative.split("/")
+        if (
+            len(parts) < 2
+            or parts[0] not in PUBLIC_DIRECTORIES
+            or any(not part or part.startswith(".") or part == ".." for part in parts)
+        ):
+            return None
+        base = (self.server.config.html_file.parent / parts[0]).resolve()
+        candidate = (base / "/".join(parts[1:])).resolve()
+        if not candidate.is_relative_to(base) or not candidate.is_file():
+            return None
+        if candidate.suffix.lower() not in STATIC_CONTENT_TYPES:
+            return None
+        return candidate
 
     def _serve_html(self) -> None:
         html_path = self.server.config.html_file.resolve()
@@ -633,41 +894,17 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
         # ---------------------------------------------------------
         # نظام التوجيه الديناميكي للملفات الخاصة والتحقق من IP
+        # /<name> serves C-C-*<name>.html only to IPs listed in current-ip.html.
         # ---------------------------------------------------------
-        if req_path_name and not path.startswith("/api/"):
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,100}", req_path_name):
             base_dir = self.server.config.html_file.parent
-            matching_files = list(base_dir.glob(f"C-C-*{req_path_name}.html"))
-            
+            matching_files = sorted(base_dir.glob(f"C-C-*{req_path_name}.html"))
             if matching_files:
-                client_ip = self._get_client_ip()
-                ip_file = base_dir / "current-ip.html"
-                ip_authorized = False
-                
-                if ip_file.is_file():
-                    try:
-                        ip_contents = ip_file.read_text(encoding="utf-8").strip()
-                        if client_ip in ip_contents:
-                            ip_authorized = True
-                    except Exception as e:
-                        LOGGER.error(f"Error reading current-ip.html: {e}")
-                
-                if ip_authorized:
-                    try:
-                        body = matching_files[0].read_bytes()
-                        self.send_response(HTTPStatus.OK)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.send_header("Content-Length", str(len(body)))
-                        self.send_header("Cache-Control", "no-cache")
-                        self.send_header("X-Content-Type-Options", "nosniff")
-                        self.end_headers()
-                        self.wfile.write(body)
-                    except Exception as e:
-                        LOGGER.error(f"Error reading dynamic file: {e}")
-                        self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "File error")
-                    return
+                if self._ip_is_allowed(self._get_client_ip()):
+                    self._send_file(matching_files[0], STATIC_CONTENT_TYPES[".html"], "no-store")
                 else:
-                    self._send_error(HTTPStatus.FORBIDDEN, "Route not found.")
-                    return
+                    self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+                return
         # ---------------------------------------------------------
 
         # الصفحات الأساسية
@@ -719,47 +956,16 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             return
 
         # ---------------------------------------------------------
-        # قراءة أي ملف مرفق كيفما كان نوعه (بدون شروط الامتداد)
+        # الملفات العامة فقط: products-json/, categories-json/, footers-html/,
+        # assets/, images/. app.py, .env and data/ can never be downloaded.
         # ---------------------------------------------------------
-        if req_path_name and ".." not in req_path_name and not path.startswith("/api/"):
-            base_dir = self.server.config.html_file.parent
-            requested_file = base_dir / req_path_name
-            
-            if requested_file.is_file():
-                # قاموس مبدئي للملفات المعروفة باش المتصفح يقراها مزيان
-                content_types = {
-                    ".html": "text/html; charset=utf-8",
-                    ".css": "text/css; charset=utf-8",
-                    ".js": "application/javascript; charset=utf-8",
-                    ".json": "application/json; charset=utf-8",
-                    ".png": "image/png",
-                    ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
-                    ".gif": "image/gif",
-                    ".svg": "image/svg+xml",
-                    ".ico": "image/x-icon",
-                    ".woff": "font/woff",
-                    ".woff2": "font/woff2",
-                    ".ttf": "font/ttf",
-                    ".mp4": "video/mp4",
-                    ".mp3": "audio/mpeg",
-                }
-                # الا ماكانش الامتداد معروف، كيتعطى كملف عادي للتحميل أو القراءة
-                content_type = content_types.get(requested_file.suffix.lower(), "application/octet-stream")
-                
-                try:
-                    body = requested_file.read_bytes()
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", content_type)
-                    self.send_header("Content-Length", str(len(body)))
-                    self.send_header("Cache-Control", "public, max-age=86400")
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                except Exception as e:
-                    LOGGER.error(f"Error reading file {requested_file}: {e}")
-                    self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Error reading file.")
-                    return
+        public_file = self._public_file(req_path_name)
+        if public_file is not None:
+            content_type = STATIC_CONTENT_TYPES[public_file.suffix.lower()]
+            # JSON product files change when the shop is edited: always revalidate them.
+            cache = "no-cache" if public_file.suffix.lower() in {".json", ".html"} else "public, max-age=86400"
+            self._send_file(public_file, content_type, cache)
+            return
         # ---------------------------------------------------------
 
         self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
@@ -797,7 +1003,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 order["total"],
             )
             
-            send_telegram_notification(order)
+            notify_order_in_background(order)
 
             self._send_json(
                 {
@@ -838,10 +1044,13 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 class AmaniHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    # Python's default is 5: a burst of visitors got "connection reset".
+    request_queue_size = 256
 
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
-        self.store = OrderStore(config.db_path)
+        self.catalog = ProductCatalog(config.html_file.parent / "products-json")
+        self.store = OrderStore(config.db_path, self.catalog)
         super().__init__((config.host, config.port), AmaniRequestHandler)
 
 
@@ -855,6 +1064,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    load_dotenv(APP_DIR / ".env")
     logging.basicConfig(
         level=os.getenv("AMANI_LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",

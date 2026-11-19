@@ -1,0 +1,8 @@
+# Secrets and live data never go to GitHub
+.env
+data/
+*.sqlite3
+*.sqlite3-*
+backups/
+__pycache__/
+*.pyc

@@ -1,0 +1,125 @@
+[
+  {
+    "title": "News",
+    "url": "#",
+    "order": 1,
+    "active": "no",
+    "bgColor": "#ffffff",
+    "color": "#1f1f1f",
+    "activeColor": "#0a3a2a"
+  },
+  {
+    "title": "Offers",
+    "url": "#",
+    "order": 2,
+    "active": "no",
+    "bgColor": "#ffffff",
+    "color": "#1f1f1f",
+    "activeColor": "#0a3a2a"
+  },
+  {
+    "title": "Beauty & Health",
+    "url": "#",
+    "order": 3,
+    "active": "no",
+    "bgColor": "#ffffff",
+    "color": "#1f1f1f",
+    "activeColor": "#0a3a2a",
+    "subcategories": [
+      {
+        "title": "Skincare",
+        "url": "templates-html/templatepage-2.html",
+        "active": "yes",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
+        "title": "Hair Care",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
+        "title": "Personal Care",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      }
+    ]
+  },
+  {
+    "title": "Sports",
+    "url": "#",
+    "order": 4,
+    "active": "no",
+    "bgColor": "#ffffff",
+    "color": "#1f1f1f",
+    "activeColor": "#0a3a2a",
+    "subcategories": [
+      {
+        "title": "Fitness",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
+        "title": "Running",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
+        "title": "Outdoor Sports",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      }
+    ]
+  },
+  {
+    "title": "Cooking",
+    "url": "#",
+    "order": 5,
+    "active": "no",
+    "bgColor": "#ffffff",
+    "color": "#1f1f1f",
+    "activeColor": "#0a3a2a",
+    "subcategories": [
+      {
+        "title": "Cookware",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
+        "title": "Kitchen Tools",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      },
+      {
+        "title": "Bakeware",
+        "url": "#",
+        "active": "no",
+        "bgColor": "#f9f8f6",
+        "color": "#666666",
+        "activeColor": "#c5a059"
+      }
+    ]
+  }
+]

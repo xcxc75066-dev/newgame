@@ -1137,7 +1137,45 @@
         .bg-facebook { background-color: #1877f2; }
         .bg-instagram { background: linear-gradient(135deg, #f58529, #dd2a7b, #8134af); }
         .bg-theme { background-color: #334155; }
-        .bg-language { background-color: #94a3b8; }
+        .nav-social .nav-languages {
+            flex-basis: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+        }
+        .nav-social .nav-languages button {
+            width: auto;
+            height: 34px;
+            min-width: 48px;
+            padding: 0 14px;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-dark);
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+        .nav-social .nav-languages button.is-active {
+            background: var(--primary-green);
+            border-color: var(--primary-green);
+            color: #ffffff;
+        }
+        /* Google Translate: hide its own bar, tooltips and highlights */
+        body > .skiptranslate,
+        iframe.skiptranslate,
+        .goog-te-banner-frame,
+        .goog-te-balloon-frame,
+        #goog-gt-tt,
+        .VIpgJd-ZVi9od-ORHb-OEVmcd,
+        .VIpgJd-ZVi9od-aZ2wEe-wOHMyf,
+        .VIpgJd-yAWNEb-L7lbkb {
+            display: none !important;
+        }
+        body { top: 0 !important; }
+        .goog-text-highlight {
+            background: none !important;
+            box-shadow: none !important;
+        }
         .nav-social button:disabled {
             cursor: not-allowed;
             opacity: 0.55;
@@ -2068,9 +2106,11 @@
             <button type="button" class="bg-theme" id="themeToggleBtn" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Dark / Light mode">
                 <i class="fa-solid fa-moon"></i>
             </button>
-            <button type="button" class="bg-language" disabled="" aria-label="Language selector unavailable" title="Language selector unavailable">
-                <i class="fa-solid fa-language"></i>
-            </button>
+            <div class="nav-languages notranslate" aria-label="Language">
+                <button type="button" data-lang="en" title="English">EN</button>
+                <button type="button" data-lang="fr" title="Français">FR</button>
+                <button type="button" data-lang="ar" title="العربية">ع</button>
+            </div>
         </div>
     </div>
 
@@ -2191,7 +2231,7 @@
     <!-- Header (Amani Market + Cart Icon) -->
     <header>
         <a href="#" class="logo">
-            <div class="logo-title-wrap">
+            <div class="logo-title-wrap notranslate">
                 <i class="fa-solid fa-cart-shopping"></i>
                 <span>AMANI MARKET</span>
             </div>
@@ -2309,6 +2349,7 @@
     <!-- Footer is maintained in its own file (footers-html/footer-main.html).
          It is placed straight into the page, so it always shows at full height. -->
     <div class="external-footer-frame" id="siteFooterHost"></div>
+    <div id="google_translate_element" hidden></div>
 
     <!-- Floating WhatsApp -->
     <a href="https://wa.me/212754708678" class="whatsapp-float" target="_blank">
@@ -3389,7 +3430,7 @@
             card.innerHTML = `
                 <div class="card-slide"><img src="${jsonEscape(product.image)}" class="product-image" alt="${jsonEscape(product.title)}" loading="lazy">${badgeMarkup}</div>
                 <div class="product-info">
-                    <span class="brand-name">${jsonEscape(product.brand)}</span>
+                    <span class="brand-name notranslate">${jsonEscape(product.brand)}</span>
                     <h3 class="product-title">${jsonEscape(product.title)}</h3>
                     <span class="current-price">${jsonEscape(product.price)} DH</span>
                     <span class="old-price">${oldPrice ? `${jsonEscape(oldPrice)} DH` : ''}</span>
@@ -3685,12 +3726,99 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        document.querySelectorAll('[data-catalog-page]').forEach(link => {
-            link.addEventListener('click', (event) => {
-                event.preventDefault();
-                openCatalogPage(link.dataset.catalogPage);
+        function bindCatalogLinks(root = document) {
+            root.querySelectorAll('[data-catalog-page]').forEach(link => {
+                if (link.dataset.catalogBound) return;
+                link.dataset.catalogBound = '1';
+                link.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    openCatalogPage(link.dataset.catalogPage);
+                });
             });
-        });
+        }
+        bindCatalogLinks();
+
+        // --- LANGUAGE (Google Translate) ---
+        // The shop can be read in English, French or Arabic. Google Translate
+        // translates everything on the page, products included (even ones written
+        // in Arabic). First visit: the visitor's phone/browser language is used.
+        const SITE_LANGUAGES = ['en', 'fr', 'ar'];
+        const LANGUAGE_STORAGE_KEY = 'amani-language';
+
+        function storedSiteLanguage() {
+            try { return localStorage.getItem(LANGUAGE_STORAGE_KEY) || ''; } catch (_) { return ''; }
+        }
+
+        function browserSiteLanguage() {
+            const wanted = navigator.languages && navigator.languages.length
+                ? navigator.languages
+                : [navigator.language || 'en'];
+            for (const language of wanted) {
+                const code = String(language).slice(0, 2).toLowerCase();
+                if (SITE_LANGUAGES.includes(code)) return code;
+            }
+            return 'en';
+        }
+
+        function currentSiteLanguage() {
+            const stored = storedSiteLanguage();
+            return SITE_LANGUAGES.includes(stored) ? stored : browserSiteLanguage();
+        }
+
+        function setTranslateCookie(language) {
+            const host = window.location.hostname;
+            const parts = host.split('.');
+            const domains = ['', host, `.${parts.slice(-2).join('.')}`];
+            // Clear every copy Google may have stored, then set the new choice.
+            domains.forEach(domain => {
+                document.cookie = `googtrans=; path=/; max-age=0${domain ? `; domain=${domain}` : ''}`;
+            });
+            document.cookie = `googtrans=/auto/${language}; path=/; max-age=31536000; SameSite=Lax`;
+        }
+
+        function markLanguageButtons(language) {
+            document.querySelectorAll('[data-lang]').forEach(button => {
+                const active = button.dataset.lang === language;
+                button.classList.toggle('is-active', active);
+                button.setAttribute('aria-pressed', String(active));
+            });
+        }
+
+        function chooseSiteLanguage(language) {
+            if (!SITE_LANGUAGES.includes(language)) return;
+            try { localStorage.setItem(LANGUAGE_STORAGE_KEY, language); } catch (_) { /* private mode */ }
+            setTranslateCookie(language);
+            window.location.reload();
+        }
+
+        function bindLanguageButtons(root = document) {
+            root.querySelectorAll('[data-lang]').forEach(button => {
+                if (button.dataset.langBound) return;
+                button.dataset.langBound = '1';
+                button.addEventListener('click', () => chooseSiteLanguage(button.dataset.lang));
+            });
+            markLanguageButtons(currentSiteLanguage());
+        }
+
+        function startSiteTranslation() {
+            const language = currentSiteLanguage();
+            setTranslateCookie(language); // must exist before Google's script starts
+            bindLanguageButtons();
+            window.googleTranslateElementInit = () => {
+                if (!window.google || !google.translate) return;
+                new google.translate.TranslateElement({
+                    includedLanguages: SITE_LANGUAGES.join(','),
+                    autoDisplay: false
+                }, 'google_translate_element');
+            };
+            const script = document.createElement('script');
+            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+            script.async = true;
+            script.onerror = () => console.warn('Google Translate could not be loaded.');
+            document.body.appendChild(script);
+        }
+
+        startSiteTranslation();
 
         const whatsNewLink = document.querySelector('.whats-new-btn');
         if (whatsNewLink) {
@@ -4127,36 +4255,26 @@
         }
 
         // --- FOOTER ---
-        // The footer's own styles stay inside it (shadow DOM): they cannot change
-        // the shop, and the shop's styles cannot break the footer.
-        const FOOTER_DARK_CSS = `
-            :host(.dark) {
-                --bg-color: #111827;
-                --text-main: #e5e7eb;
-                --text-muted: #a7b0bd;
-                --border-color: #334155;
-                --primary-dark: #c5a059;
-            }`;
-
+        // footers-html/footer-main.html is placed straight into the page: no frame
+        // (so it shows at full height) and no shadow DOM (so Google Translate can
+        // translate it). All its classes start with "af-", so it cannot restyle the shop.
         async function loadSiteFooter() {
             const host = document.getElementById('siteFooterHost');
-            if (!host || host.shadowRoot) return;
+            if (!host || host.dataset.loaded) return;
             try {
                 const response = await fetch(new URL('footers-html/footer-main.html', document.baseURI), { cache: 'no-cache' });
                 if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 const footerDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
                 const footer = footerDocument.querySelector('footer');
                 if (!footer) throw new Error('footer-main.html has no <footer> element.');
-                const css = [...footerDocument.querySelectorAll('style')]
-                    .map(style => style.textContent)
-                    .join('\n')
-                    .replace(/:root\b/g, ':host')
-                    .replace(/(^|[\s,}])body(?=[\s,{])/g, '$1:host');
-                const root = host.attachShadow({ mode: 'open' });
                 const style = document.createElement('style');
-                style.textContent = `:host { display: block; }\n${css}\n${FOOTER_DARK_CSS}`;
-                root.append(style, document.importNode(footer, true));
-                host.classList.toggle('dark', document.body.classList.contains('dark-mode'));
+                style.textContent = [...footerDocument.querySelectorAll('style')]
+                    .map(element => element.textContent)
+                    .join('\n');
+                host.replaceChildren(style, document.importNode(footer, true));
+                host.dataset.loaded = '1';
+                bindCatalogLinks(host);
+                bindLanguageButtons(host);
             } catch (error) {
                 console.warn('The footer could not be loaded.', error);
             }

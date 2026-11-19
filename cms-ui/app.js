@@ -18,6 +18,21 @@
     'bottom-left': 'أسفل اليسار',
     'bottom-right': 'أسفل اليمين'
   };
+  // Same rules as the shop: What's New = added in the last 30 days,
+  // Best Offers = the customer saves more than 100 DH.
+  const NEW_PRODUCT_DAYS = 30;
+  const BEST_OFFER_MIN_SAVING = 100;
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+  const isNewProduct = (product) => {
+    const added = Date.parse(String(product.addedAt || ''));
+    return Number.isFinite(added) && Date.now() - added <= NEW_PRODUCT_DAYS * 86400000 && added <= Date.now() + 86400000;
+  };
+  const saving = (product) => {
+    const price = Number(product.price), old = Number(product.oldPrice);
+    return old > price && price > 0 ? old - price : 0;
+  };
+  const isBestOffer = (product) => saving(product) > BEST_OFFER_MIN_SAVING;
+
   const BADGE_COLORS = ['#0A3A2A', '#C5A059', '#DC2626', '#111111', '#2563EB'];
   const PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#ebe8e1"/></svg>'
@@ -237,6 +252,8 @@
         h('div', { class: 'tags' },
           h('span', { class: `tag${list === 'more' ? ' gold' : ''}`, text: LISTS[list] }),
           product.hidden ? h('span', { class: 'tag grey', text: 'مخفي' }) : null,
+          isNewProduct(product) ? h('span', { class: 'tag new', text: '✨ جديد' }) : null,
+          isBestOffer(product) ? h('span', { class: 'tag offer', text: `🏷 عرض (توفير ${saving(product)} DH)` }) : null,
           optionsCount ? h('span', { class: 'tag grey', text: `${optionsCount} خيارات` }) : null
         ),
         h('div', { class: 'row-actions' },
@@ -268,6 +285,7 @@
     copy['pro-id123'] = '';
     copy.title = `${copy.title} (نسخة)`.slice(0, 120);
     copy.hidden = true; // copies start hidden so nothing half-finished appears in the shop
+    copy.addedAt = todayIso();
     lists[list].splice(index + 1, 0, copy);
     if (await saveLists(lists, 'تم النسخ (النسخة مخفية حتى تعدلها)')) openEditor(list, index + 1);
   }
@@ -294,7 +312,7 @@
     return {
       id: '', 'pro-id123': '', title: '', brand: 'AMANI PARFUMS', price: '', oldPrice: '',
       description: '', image: '', sections: ['popular', 'related', 'offers'], badges: [],
-      colors: [presetGroup('size')], hidden: false
+      colors: [presetGroup('size')], hidden: false, addedAt: todayIso()
     };
   }
 
@@ -331,6 +349,8 @@
     $('f-image').value = draft.image || '';
     $('f-list').value = list;
     $('f-visible').checked = !draft.hidden;
+    $('f-addedAt').value = draft.addedAt || todayIso();
+    draft.addedAt = $('f-addedAt').value;
     $('dangerZone').hidden = isNew;
     document.querySelectorAll('#editorForm .invalid').forEach((el) => el.classList.remove('invalid'));
 
@@ -381,6 +401,10 @@
     renderImagePreview();
   });
   $('f-visible').addEventListener('change', () => { state.editing.draft.hidden = !$('f-visible').checked; });
+  $('f-addedAt').addEventListener('change', () => {
+    state.editing.draft.addedAt = $('f-addedAt').value || todayIso();
+    renderDiscount();
+  });
 
   function discountPercent() {
     const { price, oldPrice } = state.editing.draft;
@@ -389,8 +413,17 @@
   }
 
   function renderDiscount() {
+    const draft = state.editing.draft;
     const percent = discountPercent();
-    $('discountHint').textContent = percent ? `تخفيض ${percent}% يظهر للزبون.` : 'بدون ثمن قديم = بدون تخفيض.';
+    const save = saving(draft);
+    $('discountHint').textContent = percent
+      ? `تخفيض ${percent}% (توفير ${save} DH)${isBestOffer(draft) ? ' ← يظهر في Best Offers ✓' : ` · Best Offers يحتاج توفير أكثر من ${BEST_OFFER_MIN_SAVING} DH`}`
+      : 'بدون ثمن قديم = بدون تخفيض.';
+    const added = Date.parse(draft.addedAt || '');
+    const daysLeft = Number.isFinite(added) ? Math.ceil(NEW_PRODUCT_DAYS - (Date.now() - added) / 86400000) : 0;
+    $('autoSectionsHint').textContent = isNewProduct(draft)
+      ? `✨ يظهر في What's New لمدة ${daysLeft} يوماً أخرى.`
+      : `لا يظهر في What's New (فقط المنتجات المضافة في آخر ${NEW_PRODUCT_DAYS} يوماً).`;
   }
 
   function renderImagePreview() {

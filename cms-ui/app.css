@@ -144,6 +144,9 @@ input.invalid, textarea.invalid { border-color: var(--danger); box-shadow: 0 0 0
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef3f0; color: var(--green); font-weight: 700; }
 .tag.gold { background: #f7efdf; color: #8a6a2a; }
 .tag.grey { background: #eceae5; color: var(--muted); }
+.tag.new { background: #e3f4ea; color: #12663f; }
+.tag.offer { background: #fdeaea; color: #b42318; }
+.date-field { margin-top: 14px; }
 .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .row-actions .icon-btn { width: 36px; height: 36px; font-size: 14px; }
 

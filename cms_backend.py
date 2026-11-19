@@ -50,6 +50,7 @@ HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,119}$")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class CmsError(Exception):
@@ -63,6 +64,25 @@ class CmsError(Exception):
 
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def today() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def clean_date(value: Any) -> str:
+    """The day a product was added (YYYY-MM-DD). Missing or invalid -> today.
+
+    The shop lists a product under "What's New" for 30 days after this date.
+    """
+    text = str(value or "").strip()[:10]
+    if DATE_PATTERN.fullmatch(text):
+        try:
+            datetime.strptime(text, "%Y-%m-%d")
+            return text
+        except ValueError:
+            pass
+    return today()
 
 
 # ------------------------------------------------------------------ passwords
@@ -344,6 +364,7 @@ def clean_product(
         "badges": clean_badges,
         "colors": clean_groups,
         "hidden": bool(raw.get("hidden")),
+        "addedAt": clean_date(raw.get("addedAt")),
     }
 
 
@@ -398,6 +419,17 @@ class ContentStore:
             # First start: begin with the products that were in the repository.
             for source in sorted(seed_products_dir.glob("*.json")):
                 shutil.copy2(source, self.products_dir / source.name)
+        self._add_missing_dates()
+
+    def _add_missing_dates(self) -> None:
+        """Older products have no "addedAt" yet: give them today's date once."""
+        lists, _ = self.read()
+        if all(p.get("addedAt") for items in lists.values() for p in items):
+            return
+        for items in lists.values():
+            for product in items:
+                product["addedAt"] = clean_date(product.get("addedAt"))
+        self._write(lists)
 
     def _raw(self) -> dict[str, bytes]:
         raw = {}

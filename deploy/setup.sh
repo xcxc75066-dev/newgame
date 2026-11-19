@@ -59,6 +59,11 @@ if [ ! -f "$APP/.env" ]; then
     sed -i "s|^AMANI_ADMIN_TOKEN=.*|AMANI_ADMIN_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')|" "$APP/.env"
     sed -i "s|^AMANI_ALLOWED_ORIGINS=.*|AMANI_ALLOWED_ORIGINS=https://$DOMAIN,https://www.$DOMAIN|" "$APP/.env"
 fi
+# The CMS lives on admin.<domain> (the old /mycmseditor address closes)
+if ! grep -q '^AMANI_ADMIN_HOST=' "$APP/.env"; then
+    [ -z "$(tail -c1 "$APP/.env")" ] || echo >> "$APP/.env"
+    echo "AMANI_ADMIN_HOST=admin.$DOMAIN" >> "$APP/.env"
+fi
 chown -R "$APP_USER:$APP_USER" "$BASE"
 chmod 600 "$APP/.env"
 
@@ -91,6 +96,12 @@ www.$DOMAIN {
 }
 
 $DOMAIN {
+    encode gzip
+    reverse_proxy 127.0.0.1:5000
+}
+
+# The CMS has its own address
+admin.$DOMAIN {
     encode gzip
     reverse_proxy 127.0.0.1:5000
 }
@@ -185,6 +196,7 @@ fi
 cat <<EOF
 
   Website:  https://$DOMAIN   (HTTPS can take 1-2 minutes the first time)
+  CMS:      https://admin.$DOMAIN
 
   Last step: put your NEW Telegram token in the settings file:
       nano $APP/.env

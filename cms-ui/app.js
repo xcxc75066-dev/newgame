@@ -769,5 +769,11 @@
 
   $('addProductBtn').addEventListener('click', () => openEditor('popular', null));
 
+  // On admin.<domain>, the "shop" button goes to the main site.
+  if (location.hostname.startsWith('admin.')) {
+    const shopLink = document.querySelector('.topbar-actions a');
+    if (shopLink) shopLink.href = `${location.protocol}//${location.hostname.slice('admin.'.length)}/`;
+  }
+
   boot();
 })();

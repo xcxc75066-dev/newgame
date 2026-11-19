@@ -451,6 +451,9 @@ class ServerConfig:
     allowed_origins: tuple[str, ...]
     behind_cloudflare: bool = False
     max_body_bytes: int = MAX_JSON_BYTES
+    # When set (e.g. admin.boutiqueamani-maroc.com) the CMS lives only on that
+    # host and the old /mycmseditor address is closed.
+    admin_host: str = ""
 
     @classmethod
     def from_environment(cls, args: argparse.Namespace) -> "ServerConfig":
@@ -475,6 +478,7 @@ class ServerConfig:
             allowed_origins=origins,
             behind_cloudflare=os.getenv("AMANI_BEHIND_CLOUDFLARE", "").strip().lower()
             in {"1", "true", "yes"},
+            admin_host=os.getenv("AMANI_ADMIN_HOST", "").strip().lower(),
         )
 
 class OrderStore:
@@ -884,13 +888,16 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         self._write_body(body)
 
     # ------------------------------------------------------------------ CMS
-    def _serve_cms_ui(self, name: str) -> None:
+    def _serve_cms_ui(self, name: str, *, on_admin_host: bool = False) -> None:
         entry = CMS_UI_FILES.get(name)
         file_path = CMS_UI_DIR / entry[0] if entry else None
         if file_path is None or not file_path.is_file():
             self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
             return
         body = file_path.read_bytes()
+        if on_admin_host and name == "":
+            # On admin.<domain> the editor's files sit at the root.
+            body = body.replace(f"{CMS_PATH}/".encode(), b"/")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", entry[1])
         self.send_header("Content-Length", str(len(body)))
@@ -1015,6 +1022,39 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             LOGGER.exception("cms_error path=%s", path)
             self._send_cms(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": "خطأ في السيرفر. حاول مرة أخرى."})
 
+    def _request_host(self) -> str:
+        host = (self.headers.get("Host") or "").strip().lower()
+        if host.startswith("["):  # IPv6 literal
+            return host.split("]")[0] + "]"
+        return host.split(":")[0]
+
+    def _route_admin_host(self, method: str, path: str, query: dict[str, list[str]]) -> bool:
+        """Apply the admin-host rules. Returns True when the request was answered."""
+        admin_host = self.server.config.admin_host
+        is_cms_path = path == CMS_PATH or path.startswith(CMS_PATH + "/") or path.startswith("/api/cms/")
+        if not admin_host:
+            return False  # no admin host configured: the CMS stays at /mycmseditor
+        if self._request_host() != admin_host:
+            if is_cms_path:  # the old address is closed: one single way in
+                self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+                return True
+            return False
+        # admin.<domain> serves the CMS and nothing else
+        if path.startswith("/api/cms/"):
+            self._handle_cms(method, path, query)
+            return True
+        if method == "GET":
+            if path == "/":
+                self._serve_cms_ui("", on_admin_host=True)
+                return True
+            if path in {"/app.js", "/app.css"}:
+                self._serve_cms_ui(path.lstrip("/"))
+                return True
+            if path.startswith(("/uploads/", "/assets/")) or path == "/favicon.ico":
+                return False  # product photos and the logo, served as usual
+        self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+        return True
+
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
@@ -1038,6 +1078,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
         query = parse_qs(parsed.query)
         req_path_name = path.strip("/")
+        if self._route_admin_host("GET", path, query):
+            return
 
         if path == "/api/product-files":
             product_dir = self.server.cms.content.products_dir.resolve()
@@ -1170,6 +1212,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if self._route_admin_host("POST", path, {}):
+            return
         if path.startswith("/api/cms/"):
             self._handle_cms("POST", path, {})
             return
@@ -1224,6 +1268,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if self._route_admin_host("PUT", path, {}):
+            return
         if path.startswith("/api/cms/"):
             self._handle_cms("PUT", path, {})
             return
@@ -1231,6 +1277,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if self._route_admin_host("PATCH", path, {}):
+            return
         if path.startswith("/api/cms/"):
             self._handle_cms("PATCH", path, {})
             return

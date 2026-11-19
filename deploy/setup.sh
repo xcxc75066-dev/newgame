@@ -131,14 +131,15 @@ WantedBy=timers.target
 EOF
 git config --system --add safe.directory "$APP"
 
-say "6/7 Nightly backup of the orders"
+say "6/7 Nightly backup of orders, products and photos"
 cat > /usr/local/bin/amani-backup <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 DB=$APP/data/amani_orders.sqlite3
 [ -f "\$DB" ] || exit 0
 sqlite3 "\$DB" ".backup '$BASE/backups/orders-\$(date +%F).sqlite3'"
-cp -rT $APP/products-json "$BASE/backups/products-json-\$(date +%F)"
+# Products, photos and history edited in the CMS live in data/ (not in git).
+tar -czf "$BASE/backups/cms-\$(date +%F).tar.gz" -C $APP/data content content-history uploads 2>/dev/null || true
 find $BASE/backups -mindepth 1 -maxdepth 1 -mtime +14 -exec rm -rf {} +
 EOF
 chmod 755 /usr/local/bin/amani-backup

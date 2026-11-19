@@ -3240,7 +3240,10 @@
             const payload = await response.json();
             const products = Array.isArray(payload) ? payload : payload.products;
             if (!Array.isArray(products)) return [];
-            return products.map(product => normalizeJsonProduct(product, file));
+            // Products hidden in the CMS are not shown in the shop.
+            return products
+                .filter(product => product && product.hidden !== true)
+                .map(product => normalizeJsonProduct(product, file));
         }
 
         async function getJsonFiles() {

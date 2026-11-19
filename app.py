@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 import threading
 import uuid
 import urllib.request
@@ -30,6 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from http import HTTPStatus
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -43,6 +45,31 @@ ALLOWED_STATUSES = frozenset(
 )
 PRODUCT_ROUTE_PATTERN = re.compile(r"^/p/[^/]+/?$", re.IGNORECASE)
 APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+import cms_backend  # noqa: E402  (needs APP_DIR on sys.path)
+from cms_backend import CmsError, CmsService  # noqa: E402
+
+CMS_PATH = "/mycmseditor"
+CMS_UI_DIR = APP_DIR / "cms-ui"
+CMS_UI_FILES = {
+    "": ("index.html", "text/html; charset=utf-8"),
+    "app.js": ("app.js", "application/javascript; charset=utf-8"),
+    "app.css": ("app.css", "text/css; charset=utf-8"),
+}
+CMS_SECURITY_HEADERS = {
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow",
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' https: data: blob:; connect-src 'self'; font-src 'self'; "
+        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    ),
+}
 
 # Only these folders (next to the HTML file) are served to visitors.
 # Everything else - app.py, .env, data/, backups - is never reachable.
@@ -272,7 +299,7 @@ class ProductCatalog:
                 continue
             entries = data.get("products") if isinstance(data, dict) else data
             for product in entries if isinstance(entries, list) else []:
-                if not isinstance(product, dict):
+                if not isinstance(product, dict) or product.get("hidden"):
                     continue
                 # Same id rules as normalizeJsonProduct() in the storefront HTML.
                 keys = {
@@ -827,7 +854,11 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             or any(not part or part.startswith(".") or part == ".." for part in parts)
         ):
             return None
-        base = (self.server.config.html_file.parent / parts[0]).resolve()
+        if parts[0] == "products-json":
+            # Live products edited in the CMS (data/content), not the repository copy.
+            base = self.server.cms.content.products_dir.resolve()
+        else:
+            base = (self.server.config.html_file.parent / parts[0]).resolve()
         candidate = (base / "/".join(parts[1:])).resolve()
         if not candidate.is_relative_to(base) or not candidate.is_file():
             return None
@@ -851,6 +882,138 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self._write_body(body)
+
+    # ------------------------------------------------------------------ CMS
+    def _serve_cms_ui(self, name: str) -> None:
+        entry = CMS_UI_FILES.get(name)
+        file_path = CMS_UI_DIR / entry[0] if entry else None
+        if file_path is None or not file_path.is_file():
+            self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+            return
+        body = file_path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", entry[1])
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in CMS_SECURITY_HEADERS.items():
+            self.send_header(key, value)
+        self.end_headers()
+        self._write_body(body)
+
+    def _send_cms(self, status: int, payload: dict[str, Any], cookie: str | None = None) -> None:
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in CMS_SECURITY_HEADERS.items():
+            self.send_header(key, value)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self._write_body(body)
+
+    def _cms_token(self) -> str:
+        try:
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        except CookieError:
+            return ""
+        morsel = cookie.get(cms_backend.COOKIE_NAME)
+        return morsel.value if morsel else ""
+
+    def _read_raw_body(self, limit: int) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            raise CmsError(400, "طلب غير صالح.") from None
+        if length <= 0:
+            raise CmsError(400, "الملف فارغ.")
+        if length > limit:
+            raise CmsError(413, "الملف كبير جداً.")
+        return self.rfile.read(length)
+
+    def _handle_cms(self, method: str, path: str, query: dict[str, list[str]]) -> None:
+        cms = self.server.cms
+        # Our own editor always sends this header. A page on another site cannot
+        # (custom headers need CORS permission, which the CMS never gives).
+        if self.headers.get("X-Amani-CMS") != "1":
+            self._send_cms(HTTPStatus.FORBIDDEN, {"ok": False, "message": "Forbidden."})
+            return
+        try:
+            if path == "/api/cms/session" and method == "GET":
+                self._send_cms(HTTPStatus.OK, {
+                    "ok": True,
+                    "configured": cms.configured(),
+                    "authenticated": cms.authenticated(self._cms_token()),
+                })
+                return
+            if path == "/api/cms/login" and method == "POST":
+                token = cms.login(self._read_json().get("password"), self._get_client_ip())
+                LOGGER.info("cms_login ip=%s", self._get_client_ip())
+                self._send_cms(HTTPStatus.OK, {"ok": True}, cookie=(
+                    f"{cms_backend.COOKIE_NAME}={token}; Path=/; HttpOnly; Secure; "
+                    f"SameSite=Strict; Max-Age={cms_backend.SESSION_SECONDS}"
+                ))
+                return
+            if path == "/api/cms/logout" and method == "POST":
+                cms.logout(self._cms_token())
+                self._send_cms(HTTPStatus.OK, {"ok": True}, cookie=(
+                    f"{cms_backend.COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0"
+                ))
+                return
+
+            # ---- everything below needs a valid login
+            if not cms.authenticated(self._cms_token()):
+                raise CmsError(401, "انتهت الجلسة. سجّل الدخول من جديد.")
+
+            if path == "/api/cms/products" and method == "GET":
+                lists, version = cms.content.read()
+                self._send_cms(HTTPStatus.OK, {"ok": True, "lists": lists, "version": version})
+                return
+            if path == "/api/cms/products" and method == "PUT":
+                payload = self._read_json()
+                lists, version = cms.content.save(payload.get("lists"), payload.get("version"))
+                LOGGER.info("cms_products_saved ip=%s", self._get_client_ip())
+                self._send_cms(HTTPStatus.OK, {"ok": True, "lists": lists, "version": version})
+                return
+            if path == "/api/cms/upload" and method == "POST":
+                url = cms.content.save_upload(self._read_raw_body(cms_backend.MAX_UPLOAD_BYTES))
+                self._send_cms(HTTPStatus.CREATED, {"ok": True, "url": url})
+                return
+            if path == "/api/cms/history" and method == "GET":
+                self._send_cms(HTTPStatus.OK, {"ok": True, "items": cms.content.history()})
+                return
+            if path == "/api/cms/history/restore" and method == "POST":
+                payload = self._read_json()
+                lists, version = cms.content.restore(payload.get("name"), payload.get("version"))
+                self._send_cms(HTTPStatus.OK, {"ok": True, "lists": lists, "version": version})
+                return
+            if path == "/api/cms/orders" and method == "GET":
+                status = (query.get("status") or [""])[0] or None
+                if status is not None and status not in ALLOWED_STATUSES:
+                    raise CmsError(400, "حالة غير معروفة.")
+                try:
+                    limit = int((query.get("limit") or ["30"])[0])
+                    offset = int((query.get("offset") or ["0"])[0])
+                except ValueError:
+                    raise CmsError(400, "طلب غير صالح.") from None
+                orders = self.server.store.list_orders(status=status, limit=limit, offset=offset)
+                self._send_cms(HTTPStatus.OK, {"ok": True, "orders": orders})
+                return
+            match = re.fullmatch(r"/api/cms/orders/([a-fA-F0-9-]{20,})", path)
+            if match and method == "PATCH":
+                status = clean_text(self._read_json().get("status"), "status", max_length=30).lower()
+                order = self.server.store.update_status(match.group(1), status)
+                if order is None:
+                    raise CmsError(404, "الطلب غير موجود.")
+                self._send_cms(HTTPStatus.OK, {"ok": True, "order": order})
+                return
+            raise CmsError(404, "Route not found.")
+        except CmsError as exc:
+            self._send_cms(exc.status, {"ok": False, "message": exc.message})
+        except OrderValidationError as exc:
+            self._send_cms(HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(exc)})
+        except (sqlite3.Error, OSError):
+            LOGGER.exception("cms_error path=%s", path)
+            self._send_cms(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": "خطأ في السيرفر. حاول مرة أخرى."})
 
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -877,9 +1040,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         req_path_name = path.strip("/")
 
         if path == "/api/product-files":
-            product_dir = (self.server.config.html_file.parent / "products-json").resolve()
-            base_dir = self.server.config.html_file.parent.resolve()
-            if not product_dir.is_dir() or not product_dir.is_relative_to(base_dir):
+            product_dir = self.server.cms.content.products_dir.resolve()
+            if not product_dir.is_dir():
                 self._send_json({"ok": True, "files": []})
                 return
             files = sorted(
@@ -896,6 +1058,21 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 ),
             )
             self._send_json({"ok": True, "files": files})
+            return
+
+        if path == CMS_PATH or path.startswith(CMS_PATH + "/"):
+            self._serve_cms_ui(path[len(CMS_PATH):].strip("/"))
+            return
+        if path.startswith("/uploads/"):
+            upload = self.server.cms.content.upload_path(path[len("/uploads/"):])
+            if upload is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+                return
+            content_type = STATIC_CONTENT_TYPES["." + upload.suffix.lower().lstrip(".")]
+            self._send_file(upload, content_type, "public, max-age=31536000, immutable")
+            return
+        if path.startswith("/api/cms/"):
+            self._handle_cms("GET", path, query)
             return
 
         if path == "/api/product-clicks":
@@ -993,6 +1170,9 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if path.startswith("/api/cms/"):
+            self._handle_cms("POST", path, {})
+            return
         if path == "/api/product-clicks":
             try:
                 payload = self._read_json()
@@ -1042,7 +1222,18 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             LOGGER.exception("database_error while receiving order")
             self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "The order could not be stored.")
 
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path.rstrip("/") or "/"
+        if path.startswith("/api/cms/"):
+            self._handle_cms("PUT", path, {})
+            return
+        self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+
     def do_PATCH(self) -> None:
+        path = urlparse(self.path).path.rstrip("/") or "/"
+        if path.startswith("/api/cms/"):
+            self._handle_cms("PATCH", path, {})
+            return
         if not self._admin_authorized():
             self._send_error(HTTPStatus.UNAUTHORIZED, "Admin authorization is required.")
             return
@@ -1070,7 +1261,12 @@ class AmaniHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
-        self.catalog = ProductCatalog(config.html_file.parent / "products-json")
+        config.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Products edited in the CMS live in data/content (never touched by git).
+        self.cms = CmsService(
+            config.db_path, config.db_path.parent, config.html_file.parent / "products-json"
+        )
+        self.catalog = ProductCatalog(self.cms.content.products_dir)
         self.store = OrderStore(config.db_path, self.catalog)
         super().__init__((config.host, config.port), AmaniRequestHandler)
 

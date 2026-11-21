@@ -53,8 +53,8 @@ if str(APP_DIR) not in sys.path:
 import cms_backend  # noqa: E402  (needs APP_DIR on sys.path)
 from analytics import Analytics, shop_now  # noqa: E402
 from cms_backend import CmsError, CmsService  # noqa: E402
-import telegram_intake  # noqa: E402
-from telegram_intake import ShopBot  # noqa: E402
+import product_inbox  # noqa: E402
+from product_inbox import ProductInbox  # noqa: E402
 
 CMS_PATH = "/mycmseditor"
 CMS_UI_DIR = APP_DIR / "cms-ui"
@@ -843,22 +843,22 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             raise OrderValidationError("Request body must contain valid JSON.") from exc
 
     def _handle_intake(self) -> None:
-        """monitor.py sends a supplier product here; it becomes a draft in the shop bot."""
-        bot = self.server.shop_bot
+        """monitor.py sends a supplier product here; it becomes a card in the CMS inbox."""
+        inbox = self.server.inbox
         limiter = self.server.cms.limiter
         client_ip = self._get_client_ip()
         try:
             if limiter.retry_after(client_ip):
                 raise CmsError(429, "محاولات كثيرة. حاول من بعد.")
             supplied = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-            if not bot.check_link_code(supplied):
+            if not inbox.check_link_code(supplied):
                 limiter.failure(client_ip)
-                raise CmsError(401, "الكود ديال الربط غالط. صيفط /link للبوت ديال المتجر وعاود الربط.")
+                raise CmsError(401, "الكود ديال الربط غالط. خود السطر الجديد من الـ CMS (📥 الوارد) وعاود الربط.")
             try:
                 length = int(self.headers.get("Content-Length") or "0")
             except ValueError:
                 length = 0
-            if length <= 0 or length > telegram_intake.MAX_API_BODY:
+            if length <= 0 or length > product_inbox.MAX_API_BODY:
                 raise CmsError(413, "التصاور كبار بزاف.")
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -866,7 +866,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 raise CmsError(400, "البيانات ماشي صحيحة.") from None
             if not isinstance(payload, dict):
                 raise CmsError(400, "البيانات ماشي صحيحة.")
-            draft_id = bot.create_from_api(payload)
+            draft_id = inbox.add_from_api(payload)
         except CmsError as error:
             self._send_json({"ok": False, "message": error.message}, HTTPStatus(error.status))
             return
@@ -1155,6 +1155,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     **self.server.analytics.dashboard(),
                     "counts": self.server.store.status_counts(),
+                    "inbox": self.server.inbox.count(),
                 })
                 return
             if path == "/api/cms/report/send" and method == "POST":
@@ -1183,6 +1184,21 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 if job is None:
                     raise CmsError(404, "ما لقيناش هاد الفيديو. عاود ارفعو.")
                 self._send_cms(HTTPStatus.OK, {"ok": True, **job})
+                return
+            inbox = self.server.inbox
+            if path == "/api/cms/inbox" and method == "GET":
+                self._send_cms(HTTPStatus.OK, {"ok": True, "items": inbox.items(), "categories": cms.content.categories()})
+                return
+            if path == "/api/cms/inbox/publish" and method == "POST":
+                self._send_cms(HTTPStatus.OK, {"ok": True, **inbox.publish(self._read_json())})
+                return
+            if path == "/api/cms/inbox/delete" and method == "POST":
+                inbox.delete(str(self._read_json().get("id") or ""))
+                self._send_cms(HTTPStatus.OK, {"ok": True})
+                return
+            if path == "/api/cms/inbox/link" and method == "POST":
+                reset = bool(self._read_json().get("reset"))
+                self._send_cms(HTTPStatus.OK, {"ok": True, "line": inbox.link_line(reset)})
                 return
             if path == "/api/cms/history" and method == "GET":
                 self._send_cms(HTTPStatus.OK, {"ok": True, "items": cms.content.history()})
@@ -1529,10 +1545,9 @@ class AmaniHTTPServer(ThreadingHTTPServer):
             config.db_path,
             lambda: [p for items in self.cms.content.read()[0].values() for p in items],
         )
-        # Products sent to the shop's Telegram bot become drafts (owner only).
+        # Supplier products sent by monitor.py wait in the CMS inbox ("📥 الوارد").
         public_url = next((o for o in config.allowed_origins if o.startswith("https://")), "")
-        cms_url = f"https://{config.admin_host}" if config.admin_host else (public_url + CMS_PATH if public_url else "")
-        self.shop_bot = ShopBot(self.cms, config.db_path.parent, public_url, cms_url)
+        self.inbox = ProductInbox(self.cms, config.db_path.parent, public_url)
         super().__init__((config.host, config.port), AmaniRequestHandler)
 
 
@@ -1564,9 +1579,6 @@ def main() -> None:
 
     server = AmaniHTTPServer(config)
     server.analytics.start_scheduler()  # Telegram reports every 6 hours + daily at 21:00
-    if server.shop_bot.configured():
-        server.shop_bot.start()  # add products by sending them to the bot
-        LOGGER.info("Shop Telegram bot is listening (owner only).")
     LOGGER.info(
         "Amani Order Server listening on http://%s:%s | database=%s | html=%s",
         config.host,

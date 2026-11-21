@@ -6,8 +6,9 @@ Telegram supplier-channels watcher + product opportunity analyzer
   prices & margin, competition between suppliers, final opportunity score /100 + advice.
 - Alerts in your private, code-protected Telegram bot + the ntfy app.
 - Controlled from bot buttons. Send the bot ANY product photo / forward / post link -> report.
-- NEW: "🛒 زيدو للمتجر" button sends the product (photos + text + supplier price) to your
-  shop (boutiqueamani-maroc.com) as a hidden draft. Connect once with "🛒 ربط المتجر".
+- NEW: every new product goes by itself to your shop's CMS ("📥 الوارد") as a card with a
+  name from Google, a suggested price and the categories; you decide there. Connect once with
+  "🛒 ربط المتجر" (the line is in the CMS: 📥 الوارد ← ربط البوت ديال الموردين).
 No extra packages needed (Python 3 standard library only).
 
   python3 monitor.py               -> run
@@ -84,9 +85,12 @@ NTFY_TOPIC = ""
 NTFY_PRIORITY = 5
 
 # ---- الربط مع المتجر (boutiqueamani-maroc.com) ----
-# كيتعمرو بوحدهم: صيفط /link للبوت ديال المتجر، ومن بعد هنا ضغط «🛒 ربط المتجر» وصيفط السطر اللي عطاك
+# كيتعمرو بوحدهم: فالـ CMS سير لـ «📥 الوارد ← ربط البوت ديال الموردين»، نسخ السطر،
+# ومن بعد هنا ضغط «🛒 ربط المتجر» وصيفطو
 SHOP_URL = ""
 SHOP_TOKEN = ""
+# True = كل منتوج جديد فيه تصويرة كيمشي بوحدو للوارد فالـ CMS. False = غير منين تضغط 🛒
+AUTO_SHOP = True
 
 # ---- أصناف المواقع (تقدر تزيد فيهم) ----
 # المتاجر الكبيرة فالمغرب: كيطلعو النسبة بزاف
@@ -840,7 +844,8 @@ def analyze(results, text="", seen=None):
             "margin_ref": margin_ref, "qty": qty, "capital": capital, "profit": profit, "brand": brand,
             "nch": nch, "reposted": reposted, "opp": opp,
             "verdict": verdict, "confidence": confidence, "advice": adv,
-            "top": [(h["dom"], h["title"], h["link"]) for h in top_ma + top_gl]}
+            "top": [(h["dom"], h["title"], h["link"]) for h in top_ma + top_gl],
+            "titles": [r.get("title") or "" for r in sorted(results, key=lambda r: r.get("pos") or 99)[:20]]}
 
 
 def _lvl(x):
@@ -937,8 +942,18 @@ def matches(text):
 SHOP_ITEMS_KEPT = 150
 
 
-def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link=""):
-    """Keeps what the 🛒 button needs (photos on disk, text, link) and returns its key."""
+def shop_analysis(rep):
+    """What the CMS card needs from the Google Lens report (names, prices, score)."""
+    if not rep or not rep.get("ok"):
+        return {}
+    return {"titles": rep.get("titles") or [], "ma_prices": rep.get("ma_prices") or [],
+            "world_prices": rep.get("world_prices") or [], "presence": rep.get("presence"),
+            "demand": rep.get("demand"), "opp": rep.get("opp"), "verdict": rep.get("verdict"),
+            "brand": rep.get("brand") or ""}
+
+
+def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link="", rep=None):
+    """Keeps what the 🛒 button needs (photos on disk, text, link, report) and returns its key."""
     key = secrets.token_hex(4)
     files = []
     if photos:
@@ -950,7 +965,8 @@ def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link=""
             files.append(path)
     items = state.setdefault("shop_items", {})
     items[key] = {"ch": channel or "", "pid": pid, "text": (text or "")[:6000], "files": files,
-                  "urls": [] if files else [u for u in (urls or []) if u][:9], "link": link or "", "t": time.time()}
+                  "urls": [] if files else [u for u in (urls or []) if u][:9], "link": link or "", "t": time.time(),
+                  "analysis": shop_analysis(rep)}
     while len(items) > SHOP_ITEMS_KEPT:
         old = items.pop(min(items, key=lambda k: items[k].get("t", 0)))
         for path in old.get("files", []):
@@ -984,14 +1000,19 @@ def shop_request(payload):
         return 0, {}
 
 
-def send_to_shop(state, cid, key):
+def send_to_shop(state, cid, key, quiet=False):
+    """Sends a remembered product to the CMS inbox. quiet=True: no chat messages (automatic mode).
+    Returns True when the shop accepted it."""
+    def say(text, markup=None):
+        if not quiet:
+            send(cid, text, markup)
     item = (state.get("shop_items") or {}).get(key)
     if not item:
-        send(cid, "❌ هاد المنتوج قديم بزاف. صيفط ليا البوست من جديد (Forward ولا الرابط).")
-        return
+        say("❌ هاد المنتوج قديم بزاف. صيفط ليا البوست من جديد (Forward ولا الرابط).")
+        return False
     if not (SHOP_URL and SHOP_TOKEN):
-        send(cid, f"🛒 خاصك تربط المتجر أولا: ضغط «{BTN_SHOP}».", KEYBOARD)
-        return
+        say(f"🛒 خاصك تربط المتجر أولا: ضغط «{BTN_SHOP}».", KEYBOARD)
+        return False
     photos = []
     for path in item.get("files", []):
         try:
@@ -1005,9 +1026,9 @@ def send_to_shop(state, cid, key):
         except Exception as e:
             log(f"shop photo download failed: {e}")
     if not photos:
-        send(cid, "❌ ما بقاتش عندي التصاور ديال هاد المنتوج. صيفطهم ليا من جديد.")
-        return
-    send(cid, "⏳ كنصيفط المنتوج للمتجر...")
+        say("❌ ما بقاتش عندي التصاور ديال هاد المنتوج. صيفطهم ليا من جديد.")
+        return False
+    say("⏳ كنصيفط المنتوج للمتجر...")
     link = item.get("link") or ""
     status, answer = shop_request({
         "photos": [base64.b64encode(p).decode() for p in photos[:9]],
@@ -1015,37 +1036,41 @@ def send_to_shop(state, cid, key):
         "cost": supplier_price(item.get("text") or ""),
         "link": link if link.startswith("https://t.me/") else "",
         "source": ("@" + item["ch"]) if item.get("ch") else "monitor",
+        "analysis": item.get("analysis") or {},
     })
     if status == 201:
-        send(cid, "✅ وصل للبوت ديال المتجر كمسودة مخفية.\nسير ليه، ختار الثمن ديال البيع، وضغط ✅ نشر.")
-    elif status == 401:
-        send(cid, f"❌ الربط مع المتجر ما بقاش صالح. صيفط /link للبوت ديال المتجر وعاود «{BTN_SHOP}».", KEYBOARD)
+        say("✅ تزاد للوارد فالـ CMS (📥 الوارد).\nتما كتلقى البطاقة: السمية، الثمن، التصنيف… وكتقرر واش تزيدو.")
+        return True
+    if status == 401:
+        log("shop: link code refused (link again)")
+        say(f"❌ الربط مع المتجر ما بقاش صالح. خود السطر الجديد من الـ CMS (📥 الوارد) وعاود «{BTN_SHOP}».", KEYBOARD)
     elif status == 0:
-        send(cid, "❌ ما قدرتش نوصل للمتجر. تأكد بلي الموقع خدام وعاود.")
+        say("❌ ما قدرتش نوصل للمتجر. تأكد بلي الموقع خدام وعاود.")
     else:
-        send(cid, "❌ المتجر ما قبلش المنتوج: " + (answer.get("message") or f"خطأ {status}"))
+        log(f"shop refused: {status} {answer.get('message')}")
+        say("❌ المتجر ما قبلش المنتوج: " + (answer.get("message") or f"خطأ {status}"))
+    return False
 
 
 def link_shop(cid, text):
-    """The line from /link in the shop bot: https://site|code"""
+    """The line from the CMS (📥 الوارد ← ربط البوت ديال الموردين): https://site|code"""
     line = next((l.strip() for l in (text or "").splitlines() if "|" in l), "")
     url, _, token = line.partition("|")
     url, token = url.strip().rstrip("/"), token.strip()
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?", url) or len(token) < 32:
-        send(cid, "❌ هادا ماشي السطر الصحيح. صيفط /link للبوت ديال المتجر، ونسخ السطر اللي فيه | كامل.", KEYBOARD)
+        send(cid, "❌ هادا ماشي السطر الصحيح. فالـ CMS سير لـ «📥 الوارد ← ربط البوت ديال الموردين» ونسخ السطر كامل.", KEYBOARD)
         return
     old = (SHOP_URL, SHOP_TOKEN)
     globals().update(SHOP_URL=url, SHOP_TOKEN=token)
     status, _ = shop_request({})          # empty test: a good code answers 400 ("no photo")
     if status == 400:
         save_settings({"SHOP_URL": url, "SHOP_TOKEN": token})
-        send(cid, f"✅ تربط المتجر ({url}).\nدابا تحت كل منتوج كاين زر «🛒 زيدو للمتجر».", KEYBOARD)
+        send(cid, f"✅ تربط المتجر ({url}).\n" + ("دابا كل منتوج جديد غادي يمشي بوحدو لـ «📥 الوارد» فالـ CMS."
+                   if AUTO_SHOP else "دابا تحت كل منتوج كاين زر «🛒 زيدو للمتجر»."), KEYBOARD)
         return
     globals().update(SHOP_URL=old[0], SHOP_TOKEN=old[1])
     if status == 401:
-        send(cid, "❌ الكود غالط ولا تبدل. صيفط /link من جديد للبوت ديال المتجر.", KEYBOARD)
-    elif status == 503:
-        send(cid, "❌ البوت ديال المتجر ما مربوطش فالسيرفر (التوكن ديالو ولا CHAT_ID).", KEYBOARD)
+        send(cid, "❌ الكود غالط ولا تبدل. خود السطر من جديد من الـ CMS (📥 الوارد).", KEYBOARD)
     else:
         send(cid, f"❌ ما قدرتش نوصل للمتجر ({status or 'بلا جواب'}). تأكد من الموقع وعاود.", KEYBOARD)
 
@@ -1070,9 +1095,14 @@ def handle_post(state, channel, pid, post, pre_photos=None, link=None):
         if rep.get("ok") and SKIP_EXPOSED and rep["presence"] >= EXPOSED_THRESHOLD:
             log(f"{channel}/{pid} skipped: {rep['presence']}% in Morocco")
             return
+    shop_key = remember_for_shop(state, channel, pid, post["text"], photos, post["photos"], link, rep) if has_photo else None
+    auto_sent = bool(shop_key and AUTO_SHOP and SHOP_URL and SHOP_TOKEN
+                     and send_to_shop(state, None, shop_key, quiet=True))
     head = f"🆕 جديد فـ @{channel}\n"
     if rep:
         head += summary_lines(rep) + "\n"
+    if auto_sent:
+        head += "📥 تزاد للوارد فالـ CMS\n"
     elif CHECK_MOROCCO:
         head += "⚪ بلا تصويرة، ما قلبتش عليه\n"
     full = f"{head}\n{body}\n\n{link}"
@@ -1087,8 +1117,8 @@ def handle_post(state, channel, pid, post, pre_photos=None, link=None):
         buttons.append({"text": "🔍 Google Lens", "url": lens})
         actions.append(("🔍 Lens", lens))
     rows = [buttons]
-    if has_photo:
-        rows.append([shop_button(remember_for_shop(state, channel, pid, post["text"], photos, post["photos"], link))])
+    if shop_key and not auto_sent:
+        rows.append([shop_button(shop_key)])
     markup = json.dumps({"inline_keyboard": rows})
 
     if NTFY_TOPIC:
@@ -1215,7 +1245,7 @@ def report_for(state, cid, photo_url=None, photo_bytes=None, text="", title="م�
     rows = [buttons] if buttons else []
     pid = int(link.rsplit("/", 1)[1]) if re.search(r"/\d+$", link or "") else 0
     key = remember_for_shop(state, ch, pid, text, [photo_bytes] if photo_bytes else None,
-                            [original_url] if original_url else None, link)
+                            [original_url] if original_url else None, link, rep)
     rows.append([shop_button(key)])
     send(cid, build_report(rep, title), json.dumps({"inline_keyboard": rows}))
 
@@ -1316,7 +1346,8 @@ def status_text(state):
             f"المنتوجات اللي فالمغرب فوق {EXPOSED_THRESHOLD}%: "
             f"{'كنخبيهم' if SKIP_EXPOSED else 'كنوريهم'}\n"
             f"ntfy: {'شاعل' if NTFY_TOPIC else 'مطفي'}\n"
-            f"🛒 المتجر: {('مربوط (' + SHOP_URL + ')') if (SHOP_URL and SHOP_TOKEN) else 'ما مربوطش'}")
+            f"🛒 المتجر: {('مربوط (' + SHOP_URL + ')') if (SHOP_URL and SHOP_TOKEN) else 'ما مربوطش'}"
+            f"{' · كل منتوج كيمشي للوارد بوحدو' if (AUTO_SHOP and SHOP_URL) else ''}")
 
 
 HELP = ("استعمل الأزرار اللي لتحت 👇\n"
@@ -1330,7 +1361,7 @@ HELP = ("استعمل الأزرار اللي لتحت 👇\n"
         "🛡 ولا زيد البوت Admin فأي قناة (حتى الخاصة)، وغادي يسولك واش تقبلها\n\n"
         "📊 بغيتي تقرير على أي منتوج؟ صيفط ليا التصويرة ديالو، "
         "ولا دير Forward لبوست، ولا صيفط رابط البوست (t.me/channel/123)\n"
-        "🛒 تحت كل منتوج كاين «زيدو للمتجر»: كيمشي للبوت ديال المتجر كمسودة مخفية، وتما كتحط الثمن وتنشر\n"
+        "📥 كل منتوج جديد كيمشي بوحدو لـ «الوارد» فالـ CMS: تما كتشوف البطاقة وكتقرر واش تزيدو للمتجر\n"
         "/stop : تحبس الإشعارات عليك")
 
 
@@ -1501,8 +1532,8 @@ def handle_message(state, msg):
     elif text == BTN_SHOP:
         waiting[str(cid)] = "shop"
         send(cid, "🛒 الربط مع المتجر (مرة وحدة):\n"
-                  "1) سير للبوت ديال المتجر وصيفط ليه /link\n"
-                  "2) غادي يعطيك سطر بحال: https://boutiqueamani-maroc.com|xxxxxxxx\n"
+                  "1) دخل للـ CMS ← «📥 الوارد» ← «ربط البوت ديال الموردين» ← «وري السطر»\n"
+                  "2) غادي يبان سطر بحال: https://boutiqueamani-maroc.com|xxxxxxxx\n"
                   "3) نسخو كامل وصيفطو ليا هنا")
     elif text == "/stop":
         chats.remove(cid)
@@ -1631,8 +1662,7 @@ def poll_bot(state, wait=0):
                       timeout=wait + 20)
     except Exception as e:
         if "409" in str(e):
-            log("Bot error 409: كاين جوج نسخ ديال السكريبت خدامين بنفس البوت! خلي غير وحدة (pkill -f monitor.py)"
-                " — ولا البوت ديال المتجر كيخدم بنفس التوكن: خاص جوج بوتات مختلفين")
+            log("Bot error 409: كاين جوج نسخ ديال السكريبت خدامين بنفس البوت! خلي غير وحدة (pkill -f monitor.py)")
         else:
             log(f"Bot error (check BOT_TOKEN): {e}")
         time.sleep(min(wait, 10) or 2)
@@ -1715,10 +1745,11 @@ def main():
         send_ntfy("✅ خدام", hello, priority=3)
         state["hello_sent"] = True
         save_state(state)
-    if not state.get("shop_hello_sent"):
-        broadcast(state, f"🆕 جديد: الزر «{BTN_SHOP}» كيربط هاد البوت مع المتجر ديالك.\n"
-                         "من بعد، تحت كل منتوج كاين «🛒 زيدو للمتجر».", KEYBOARD)
-        state["shop_hello_sent"] = True
+    if not state.get("inbox_hello_sent"):
+        broadcast(state, "🆕 جديد: كل منتوج جديد كيمشي بوحدو لـ «📥 الوارد» فالـ CMS ديال المتجر، "
+                         "على شكل بطاقة (سمية من Google، ثمن مقترح، تصنيف). تما كتقرر واش تزيدو.\n"
+                         + ("" if (SHOP_URL and SHOP_TOKEN) else f"باش يخدم، ضغط «{BTN_SHOP}» مرة وحدة."), KEYBOARD)
+        state["inbox_hello_sent"] = True
         save_state(state)
 
     errors = 0

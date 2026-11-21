@@ -79,6 +79,7 @@
           <h1 class="page-title">المنتجات</h1>
           <span class="muted" id="productStats"></span>
         </header>
+        <button type="button" class="inbox-entry" data-go="inbox"><span data-icon="inbox"></span><b>الوارد من الموردين</b><i class="count" id="inboxCount">0</i></button>
         <label class="search">
           <span data-icon="search"></span>
           <span class="sr-only">بحث عن منتوج</span>
@@ -109,6 +110,7 @@
       <section id="tab-more" class="panel" hidden>
         <header class="page-head"><h1 class="page-title">المزيد</h1></header>
         <div class="menu-list">
+          <button type="button" class="menu-item" data-go="inbox"><span data-icon="inbox"></span><b>📥 الوارد</b><small>المنتجات الجداد من القنوات: فحص وزيد</small></button>
           <button type="button" class="menu-item" data-go="categories"><span data-icon="folder"></span><b>التصنيفات</b><small>الأقسام اللي فالمنيو ديال المتجر</small></button>
           <button type="button" class="menu-item" data-go="history"><span data-icon="history"></span><b>السجل</b><small>رجوع لنسخة قديمة من المنتجات</small></button>
           <a class="menu-item" id="shopLink" href="/" target="_blank" rel="noopener"><span data-icon="external"></span><b>فتح المتجر</b><small>boutiqueamani-maroc.com</small></a>
@@ -126,6 +128,26 @@
         <p class="hint">كل تصنيف كيبان فالمنيو ديال المتجر، وعندو صفحة خاصة بيه فيها المنتجات اللي اخترتي ليه.</p>
         <button class="btn primary block" id="addCategoryBtn" type="button"><span data-icon="plus"></span>تصنيف جديد</button>
         <div id="categoryList" class="category-list"></div>
+      </section>
+
+      <!-- Inbox: products found in the supplier channels -->
+      <section id="tab-inbox" class="panel" hidden>
+        <header class="page-head">
+          <button type="button" class="icon-btn" data-go="products" aria-label="رجوع" data-icon="back"></button>
+          <h1 class="page-title grow">📥 الوارد</h1>
+          <button type="button" class="icon-btn" id="refreshInbox" aria-label="تحديث" data-icon="refresh"></button>
+        </header>
+        <p class="hint">المنتجات الجداد اللي لقا البوت ديال الموردين. فحص كل بطاقة: بدل السمية والثمن إلا بغيتي، ختار التصاور والتصنيف، ومن بعد زيدها للمتجر ولا حيدها.</p>
+        <details class="box link-box" id="linkBox">
+          <summary><span data-icon="telegram"></span>ربط البوت ديال الموردين</summary>
+          <p class="hint">ضغط «وري السطر»، نسخو، وفالبوت ديال الموردين ضغط «🛒 ربط المتجر» وصيفط ليه السطر. ما تعطيه لحتى واحد.</p>
+          <div class="link-line" id="linkLine" dir="ltr" hidden></div>
+          <div class="grid-2">
+            <button type="button" class="btn secondary block" id="showLinkBtn">وري السطر</button>
+            <button type="button" class="btn ghost block" id="resetLinkBtn">بدل الكود</button>
+          </div>
+        </details>
+        <div id="inboxList" class="inbox-list"></div>
       </section>
 
       <!-- History -->

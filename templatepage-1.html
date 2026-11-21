@@ -1596,7 +1596,23 @@
             object-fit: cover;
             display: block;
         }
-        .qm-slide video { background: #000000; cursor: pointer; }
+        /* The whole video is shown (no cropping); a blurred copy fills the sides */
+        .qm-video-slide { overflow: hidden; background: #111111; }
+        .qm-slide video {
+            position: relative;
+            z-index: 1;
+            object-fit: contain;
+            background: transparent;
+            cursor: pointer;
+        }
+        .qm-slide .qm-video-bg {
+            position: absolute;
+            inset: 0;
+            object-fit: cover;
+            filter: blur(22px) brightness(0.75);
+            transform: scale(1.2);
+        }
+        .qm-sound { z-index: 2; }
         .qm-sound {
             position: absolute;
             bottom: 12px;
@@ -2062,7 +2078,7 @@
             display: flex;
             width: max-content;
             flex: 0 0 auto;
-            animation: amaniAnnouncement 16s linear infinite;
+            animation: amaniAnnouncement 22s linear infinite;
             animation-timing-function: linear;
             animation-iteration-count: infinite;
             transform: translate3d(0, 0, 0);
@@ -2314,8 +2330,8 @@
     <!-- Top Announcement Bar -->
     <div class="announcement-bar" id="promoBar">
         <div class="announcement-track" aria-live="polite">
-            <span>Free Delivery • 15-Day Warranty • Cash on Delivery</span>
-            <span aria-hidden="true">Free Delivery • 15-Day Warranty • Cash on Delivery</span>
+            <span>Free delivery all over Morocco • 15-Day Warranty • Cash on Delivery</span>
+            <span aria-hidden="true">Free delivery all over Morocco • 15-Day Warranty • Cash on Delivery</span>
         </div>
         <i class="fa-solid fa-xmark close-btn" onclick="hidePromoBar()" aria-label="Hide announcement"></i>
     </div>
@@ -4404,7 +4420,16 @@
                 video.setAttribute('muted', '');
                 video.setAttribute('playsinline', '');
                 video.preload = 'metadata';
-                if (poster) video.poster = poster;
+                if (poster) {
+                    video.poster = poster;
+                    // Blurred copy behind the video fills the empty sides (like Instagram)
+                    const backdrop = document.createElement('img');
+                    backdrop.className = 'qm-video-bg';
+                    backdrop.src = poster;
+                    backdrop.alt = '';
+                    backdrop.setAttribute('aria-hidden', 'true');
+                    slide.appendChild(backdrop);
+                }
                 video.src = videoSrc;
                 const sound = document.createElement('button');
                 sound.type = 'button';

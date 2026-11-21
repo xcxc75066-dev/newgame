@@ -45,6 +45,26 @@ for key in SETTINGS:
     kept += n
 print(f"✅ نقلت {kept} إعداد من الملف القديم (التوكن، القنوات، المفاتيح...)")
 
+# Channels added from the bot are also remembered in state.json: bring back any
+# that an older copy of monitor.py does not have.
+try:
+    import json
+    with open(os.path.join(os.path.dirname(target), "state.json"), encoding="utf-8") as f:
+        known = list((json.load(f).get("channels") or {}).keys())
+    match = re.search(r"^CHANNELS = (.*)$", new, re.M)
+    channels = json.loads(match.group(1)) if match else []
+    have = {c.lower() for c in channels}
+    added = [c for c in known if c and c.lower() not in have and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", c)]
+    if added:
+        channels += added
+        value = json.dumps(channels, ensure_ascii=False)
+        new = re.sub(r"^CHANNELS = .*$", lambda m: f"CHANNELS = {value}", new, count=1, flags=re.M)
+        print(f"✅ رجعت {len(added)} قناة من state.json (المجموع: {len(channels)})")
+    else:
+        print(f"✅ القنوات: {len(channels)}")
+except (OSError, ValueError, AttributeError):
+    pass
+
 fd, temp = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".py")
 with os.fdopen(fd, "w", encoding="utf-8") as f:
     f.write(new)

@@ -154,12 +154,23 @@ def get_token() -> tuple[str, str]:
 
 
 def get_chat_id(token: str, username: str, saved: str) -> str:
+    try:
+        return _get_chat_id(token, username, saved)
+    except KeyboardInterrupt:
+        subprocess.run(["systemctl", "start", SERVICE], capture_output=True, check=False)
+        raise SystemExit("\nStopped. Nothing was changed.") from None
+
+
+def _get_chat_id(token: str, username: str, saved: str) -> str:
     say("\nSTEP 2/4 - Your Telegram chat")
     if saved:
         say(f"  A chat is already saved (ID {saved}).")
         if ask("  Press Enter to keep it, or type NEW to choose again: ").lower() != "new":
             return saved
 
+    # The shop also reads this bot's messages (to add products). Pause it while
+    # we look for your chat, or it would take the message first.
+    subprocess.run(["systemctl", "stop", SERVICE], capture_output=True, check=False)
     say(f"  1. Open Telegram and search for @{username}")
     say("  2. Open it and press START (or send it any message, like: hi)")
     for _ in range(5):
@@ -182,6 +193,7 @@ def get_chat_id(token: str, username: str, saved: str) -> str:
         if CHAT_ID_PATTERN.fullmatch(manual):
             return manual
         say("  ❌ A chat ID is only numbers, for example 8346581676.")
+    subprocess.run(["systemctl", "start", SERVICE], capture_output=True, check=False)
     raise SystemExit("\nStopped: no chat found. Nothing was changed. Run the command again.")
 
 

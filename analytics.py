@@ -40,7 +40,11 @@ except Exception:  # pragma: no cover - no tz database
 
 LOGGER = logging.getLogger("amani.analytics")
 
-EVENT_TYPES = frozenset({"visit", "product_view", "add_to_cart", "checkout_open", "search"})
+EVENT_TYPES = frozenset({"visit", "product_view", "add_to_cart", "checkout_open", "search", "product_time", "video"})
+PRODUCT_EVENTS = frozenset({"product_view", "add_to_cart", "product_time", "video"})
+VIDEO_MARKS = frozenset({"play", "q25", "q50", "q75", "end", "sound"})
+MAX_PRODUCT_SECONDS = 600
+LONG_LOOK_SECONDS = 20
 SOURCES = frozenset({"facebook", "instagram", "whatsapp", "google", "tiktok", "youtube", "snapchat", "direct", "other"})
 DEVICES = frozenset({"mobile", "tablet", "desktop"})
 ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -135,6 +139,48 @@ def _money(value: float) -> str:
     return f"{value:,.0f} DH".replace(",", " ")
 
 
+def interest_score(s: dict[str, Any]) -> int:
+    """One number to compare products: people who opened it, stayed long,
+    watched the video, came back, put it in the cart and ordered it."""
+    return int(
+        s["unique"] + 2 * s["long_looks"] + s["video_half"] + 2 * s["returning"]
+        + 5 * s["cart"] + 10 * s["orders"]
+    )
+
+
+def _seconds(value: float) -> str:
+    value = int(round(value))
+    return f"{value // 60}د {value % 60:02d}ث" if value >= 60 else f"{value}ث"
+
+
+def interest_lines(rows: list[dict[str, Any]], limit: int = 5) -> list[str]:
+    """Daily report: the products people care about most, and the ones they
+    look at for a long time without buying (price, photos or description?)."""
+    esc = html.escape
+    lines: list[str] = []
+    top = sorted((r for r in rows if r["interest"]), key=lambda r: (-r["interest"], -r["orders"]))[:limit]
+    if top:
+        lines += ["", "<b>🔥 أكثر المنتوجات اهتماماً</b>"]
+        for n, r in enumerate(top, 1):
+            details = [f"👀 {r['unique']}"]
+            if r["watchers"]:
+                details.append(f"⏱ {_seconds(r['avg_seconds'])}")
+            if r["video_play"]:
+                details.append(f"🎬 {r['video_half']}/{r['video_play']} شافو النص")
+            details += [f"🛒 {r['cart']}", f"✅ {r['orders']}"]
+            lines.append(f"{n}. {esc(r['product'])} — {r['interest']} نقطة")
+            lines.append("    " + " · ".join(details))
+    hesitant = sorted(
+        (r for r in rows if r["long_looks"] >= 3 and not r["orders"] and r["cart"] * 4 < r["long_looks"]),
+        key=lambda r: -r["long_looks"])[:3]
+    if hesitant:
+        lines += ["", "<b>🤔 كيشوفوه مدة طويلة وما كيشريوهش</b>"]
+        lines += [f"• {esc(r['product'])}: {r['long_looks']} بقاو أكثر من {LONG_LOOK_SECONDS}ث، {r['cart']} فالسلة"
+                  for r in hesitant]
+        lines.append("💡 جرب: تخفيض صغير، تصاور ولا فيديو أحسن، ولا وصف أوضح.")
+    return lines
+
+
 class Analytics:
     def __init__(
         self,
@@ -198,15 +244,25 @@ class Analytics:
         if kind not in EVENT_TYPES or not ID_PATTERN.fullmatch(visitor) or not ID_PATTERN.fullmatch(session):
             return False
         product = str(payload.get("product") or "").strip()[:160]
-        if kind in {"product_view", "add_to_cart"} and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", product):
+        if kind in PRODUCT_EVENTS and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", product):
             return False
         value = " ".join(str(payload.get("value") or "").split())[:80].lower() if kind == "search" else ""
         if kind == "search" and len(value) < 2:
             return False
         try:
-            num = int(payload.get("num")) if kind == "search" else None
+            num = int(payload.get("num")) if kind in {"search", "product_time"} else None
         except (TypeError, ValueError):
             num = None
+        if kind == "product_time":
+            # seconds the product stayed on screen; value = how many photos/videos were seen
+            if num is None or not (1 <= num <= MAX_PRODUCT_SECONDS):
+                return False
+            slides = str(payload.get("value") or "1")
+            value = slides if re.fullmatch(r"[0-9]{1,2}", slides) else "1"
+        elif kind == "video":
+            value = str(payload.get("value") or "")
+            if value not in VIDEO_MARKS:
+                return False
         source = str(payload.get("src") or "")
         source = source if source in SOURCES else ("direct" if kind == "visit" else "")
         campaign = str(payload.get("campaign") or "").strip()
@@ -235,7 +291,7 @@ class Analytics:
             connection.execute(
                 "INSERT INTO events (ts, visitor, session, type, product, value, num, source, campaign, device, ip_hash)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (now, visitor, session, kind, product if kind != "search" else "", value, num,
+                (now, visitor, session, kind, product if kind in PRODUCT_EVENTS else "", value, num,
                  source, campaign[:60], device, ip_hash),
             )
         return True
@@ -269,6 +325,8 @@ class Analytics:
         stats: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "views": 0, "unique": 0, "returning": 0, "left": 0, "cart": 0,
             "orders": 0, "quantity": 0, "revenue": 0.0,
+            "seconds": 0, "watchers": 0, "long_looks": 0, "slides": 0.0,
+            "video_play": 0, "video_half": 0, "video_end": 0, "video_sound": 0,
         })
         with self._connect() as connection:
             for row in connection.execute(
@@ -303,6 +361,30 @@ class Analytics:
                 stats[row["product"]]["left"] = row["n"]
             for row in connection.execute(
                 """
+                SELECT product, SUM(secs) AS secs, COUNT(*) AS watchers,
+                       SUM(CASE WHEN secs >= ? THEN 1 ELSE 0 END) AS long_looks, AVG(slides) AS slides
+                FROM (SELECT product, session, SUM(num) AS secs, MAX(CAST(value AS INTEGER)) AS slides
+                      FROM events WHERE type = 'product_time' AND ts >= ? AND ts < ? GROUP BY product, session)
+                GROUP BY product
+                """, (LONG_LOOK_SECONDS, t0, t1)):
+                stats[row["product"]].update(
+                    seconds=min(row["secs"] or 0, 10**9), watchers=row["watchers"],
+                    long_looks=row["long_looks"] or 0, slides=round(row["slides"] or 0, 1),
+                )
+            for row in connection.execute(
+                """
+                SELECT product,
+                       COUNT(DISTINCT CASE WHEN value = 'play' THEN session END) AS play,
+                       COUNT(DISTINCT CASE WHEN value IN ('q50', 'q75', 'end') THEN session END) AS half,
+                       COUNT(DISTINCT CASE WHEN value = 'end' THEN session END) AS ended,
+                       COUNT(DISTINCT CASE WHEN value = 'sound' THEN session END) AS sound
+                FROM events WHERE type = 'video' AND ts >= ? AND ts < ? GROUP BY product
+                """, (t0, t1)):
+                stats[row["product"]].update(
+                    video_play=row["play"], video_half=row["half"], video_end=row["ended"], video_sound=row["sound"],
+                )
+            for row in connection.execute(
+                """
                 SELECT i.product_id, COUNT(DISTINCT o.order_id) AS orders, SUM(i.quantity) AS qty,
                        SUM(i.line_total_cents) AS cents
                 FROM order_items i JOIN orders o ON o.order_id = i.order_id
@@ -328,6 +410,8 @@ class Analytics:
             rows.append({
                 "product": titles.get(slug, slug), "slug": slug, **s,
                 "conversion": _pct(s["orders"], s["unique"]),
+                "avg_seconds": round(s["seconds"] / s["watchers"]) if s["watchers"] else 0,
+                "interest": interest_score(s),
             })
         rows.sort(key=lambda r: (-r["orders"], -r["unique"], -r["views"], r["product"]))
         return rows
@@ -337,13 +421,17 @@ class Analytics:
         out = io.StringIO()
         writer = csv.writer(out)
         writer.writerow([
-            "المنتوج", "المشاهدات", "أشخاص مختلفين", "رجعو مرة أخرى", "دخلو وخرجو بلا ما يزيدو للسلة",
-            "زادوه للسلة", "طلبات", "الكمية", "المداخيل (DH)", "نسبة التحويل",
+            "المنتوج", "نقاط الاهتمام", "المشاهدات", "أشخاص مختلفين", "رجعو مرة أخرى",
+            "متوسط الوقت (ثانية)", f"بقاو أكثر من {LONG_LOOK_SECONDS} ثانية", "متوسط التصاور اللي شافو",
+            "شغلو الفيديو", "شافو نص الفيديو", "كملو الفيديو", "شعلو الصوت",
+            "دخلو وخرجو بلا ما يزيدو للسلة", "زادوه للسلة", "طلبات", "الكمية", "المداخيل (DH)", "نسبة التحويل",
         ])
-        for r in rows:
+        for r in sorted(rows, key=lambda r: (-r["interest"], r["product"])):
             writer.writerow([
-                r["product"], r["views"], r["unique"], r["returning"], r["left"],
-                r["cart"], r["orders"], r["quantity"], f"{r['revenue']:.2f}", r["conversion"],
+                r["product"], r["interest"], r["views"], r["unique"], r["returning"],
+                r["avg_seconds"], r["long_looks"], r["slides"],
+                r["video_play"], r["video_half"], r["video_end"], r["video_sound"],
+                r["left"], r["cart"], r["orders"], r["quantity"], f"{r['revenue']:.2f}", r["conversion"],
             ])
         return "﻿".encode("utf-8") + out.getvalue().encode("utf-8")  # BOM: Excel reads Arabic
 
@@ -548,6 +636,9 @@ class Analytics:
         ]
         if top:
             lines.append(f"🏆 الأفضل: {esc(top['product'])}")
+        hot = max(rows, key=lambda r: r["interest"], default=None)
+        if hot and hot["interest"] and (not top or hot["slug"] != top["slug"]):
+            lines.append(f"🔥 الأكثر اهتماماً: {esc(hot['product'])}")
         if cold:
             lines.append(f"😴 بلا مشاهدات: {esc(', '.join(cold))}")
         if o["suspicious"]:
@@ -555,8 +646,9 @@ class Analytics:
         lines.append("\n📎 التفاصيل ديال كل منتوج فالملف.")
         return "\n".join(lines)
 
-    def daily_message(self, start: datetime, end: datetime) -> str:
+    def daily_message(self, start: datetime, end: datetime, rows: list[dict[str, Any]] | None = None) -> str:
         o = self.overview(start, end)
+        rows = self.product_rows(start, end) if rows is None else rows
         f = o["funnel"]
         esc = html.escape
         hour = lambda h: f"{h:02d}:00"
@@ -573,6 +665,7 @@ class Analytics:
         ]
         if f["checkout"] > f["valid_orders"]:
             lines.append(f"🛑 سلات متروكة (حلو الفورم وما كملوش): {f['checkout'] - f['valid_orders']}")
+        lines += interest_lines(rows)
         if o["sources"]:
             lines += ["", "<b>📣 منين جاو</b>"] + [
                 f"• {esc(s['label'])}: {s['visitors']} زائر · {s['orders']} طلب" for s in o["sources"][:6]]
@@ -646,7 +739,7 @@ class Analytics:
             return False
         chat_id = os.getenv("AMANI_TELEGRAM_CHAT_ID", "").strip()
         rows = self.product_rows(start, end)
-        text = self.daily_message(start, end) if kind == "daily" else self.short_message(start, end, rows)
+        text = self.daily_message(start, end, rows) if kind == "daily" else self.short_message(start, end, rows)
         local_end = end.astimezone(SHOP_TZ)
         filename = f"amani-{'daily' if kind == 'daily' else '6h'}-{local_end:%Y-%m-%d-%Hh}.csv"
         sent = self._telegram("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML"})

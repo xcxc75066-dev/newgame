@@ -53,6 +53,8 @@ if str(APP_DIR) not in sys.path:
 import cms_backend  # noqa: E402  (needs APP_DIR on sys.path)
 from analytics import Analytics, shop_now  # noqa: E402
 from cms_backend import CmsError, CmsService  # noqa: E402
+import telegram_intake  # noqa: E402
+from telegram_intake import ShopBot  # noqa: E402
 
 CMS_PATH = "/mycmseditor"
 CMS_UI_DIR = APP_DIR / "cms-ui"
@@ -840,6 +842,36 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise OrderValidationError("Request body must contain valid JSON.") from exc
 
+    def _handle_intake(self) -> None:
+        """monitor.py sends a supplier product here; it becomes a draft in the shop bot."""
+        bot = self.server.shop_bot
+        limiter = self.server.cms.limiter
+        client_ip = self._get_client_ip()
+        try:
+            if limiter.retry_after(client_ip):
+                raise CmsError(429, "محاولات كثيرة. حاول من بعد.")
+            supplied = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+            if not bot.check_link_code(supplied):
+                limiter.failure(client_ip)
+                raise CmsError(401, "الكود ديال الربط غالط. صيفط /link للبوت ديال المتجر وعاود الربط.")
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+            except ValueError:
+                length = 0
+            if length <= 0 or length > telegram_intake.MAX_API_BODY:
+                raise CmsError(413, "التصاور كبار بزاف.")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise CmsError(400, "البيانات ماشي صحيحة.") from None
+            if not isinstance(payload, dict):
+                raise CmsError(400, "البيانات ماشي صحيحة.")
+            draft_id = bot.create_from_api(payload)
+        except CmsError as error:
+            self._send_json({"ok": False, "message": error.message}, HTTPStatus(error.status))
+            return
+        self._send_json({"ok": True, "draft": draft_id}, HTTPStatus.CREATED)
+
     def _admin_authorized(self) -> bool:
         expected = self.server.config.admin_token
         supplied = self.headers.get("Authorization", "")
@@ -1404,6 +1436,9 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return
+        if path == "/api/intake/product":
+            self._handle_intake()
+            return
         if path == "/api/product-clicks":
             # Old pages still in visitors' browsers: accept and ignore.
             self.send_response(HTTPStatus.NO_CONTENT)
@@ -1494,6 +1529,10 @@ class AmaniHTTPServer(ThreadingHTTPServer):
             config.db_path,
             lambda: [p for items in self.cms.content.read()[0].values() for p in items],
         )
+        # Products sent to the shop's Telegram bot become drafts (owner only).
+        public_url = next((o for o in config.allowed_origins if o.startswith("https://")), "")
+        cms_url = f"https://{config.admin_host}" if config.admin_host else (public_url + CMS_PATH if public_url else "")
+        self.shop_bot = ShopBot(self.cms, config.db_path.parent, public_url, cms_url)
         super().__init__((config.host, config.port), AmaniRequestHandler)
 
 
@@ -1525,6 +1564,9 @@ def main() -> None:
 
     server = AmaniHTTPServer(config)
     server.analytics.start_scheduler()  # Telegram reports every 6 hours + daily at 21:00
+    if server.shop_bot.configured():
+        server.shop_bot.start()  # add products by sending them to the bot
+        LOGGER.info("Shop Telegram bot is listening (owner only).")
     LOGGER.info(
         "Amani Order Server listening on http://%s:%s | database=%s | html=%s",
         config.host,

@@ -1481,10 +1481,13 @@
           }),
         f.checkout > f.valid_orders ? h('p', { class: 'hint', text: `${f.checkout - f.valid_orders} بداو الفورم وما كملوش الطلب.` }) : null
       ));
-      const products = data.products.filter((r) => r.views || r.orders).slice(0, 20);
-      parts.push(card('tag', 'المنتجات', products.length
-        ? table(['المنتوج', 'مشاهدات', 'أشخاص', 'رجعو', 'خرجو بلا سلة', 'للسلة', 'طلبات', 'مداخيل'],
-          products.map((r) => [r.product, r.views, r.unique, r.returning, r.left, r.cart, r.orders, money(r.revenue)]))
+      const products = data.products.filter((r) => r.views || r.orders || r.interest)
+        .sort((a, b) => (b.interest || 0) - (a.interest || 0)).slice(0, 20);
+      const secs = (n) => (n >= 60 ? `${Math.floor(n / 60)}د ${n % 60}ث` : `${n || 0}ث`);
+      parts.push(card('tag', 'المنتجات (مرتبين بالاهتمام)', products.length
+        ? table(['المنتوج', 'نقاط', 'أشخاص', 'الوقت', 'الفيديو', 'رجعو', 'للسلة', 'طلبات', 'مداخيل'],
+          products.map((r) => [r.product, r.interest || 0, r.unique, secs(r.avg_seconds), r.video_play ? `${r.video_half || 0}/${r.video_play}` : '—',
+            r.returning, r.cart, r.orders, money(r.revenue)]))
         : h('p', { class: 'hint', text: 'ما كاين حتى مشاهدة فهاد المدة.' })));
       if (o.sources.length) parts.push(card('megaphone', 'منين جاو الزوار', table(['المصدر', 'زوار', 'طلبات'], o.sources.map((x) => [x.label, x.visitors, x.orders]))));
       if (o.campaigns.length) parts.push(card('target', 'الإعلانات (utm_campaign)', table(['الحملة', 'زوار', 'طلبات'], o.campaigns.map((x) => [x.campaign, x.visitors, x.orders]))));

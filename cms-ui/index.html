@@ -163,6 +163,19 @@
         </fieldset>
 
         <fieldset class="card">
+          <legend>صور إضافية</legend>
+          <p class="note">حتى 8 صور. الزبون كيسوايپي بيناتهم فالنافذة ديال المنتوج.</p>
+          <div id="galleryEditor" class="gallery-grid"></div>
+          <button type="button" class="btn secondary block" id="addGalleryBtn"><span data-icon="camera"></span>زيد صور</button>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend>فيديو المنتوج</legend>
+          <p class="note">فيديو قصير (حتى 60 ثانية). كيبان هو اللول، بلا صوت حتى يضغط الزبون. كنصغروه أوتوماتيك باش يخدم بسرعة.</p>
+          <div id="videoEditor"></div>
+        </fieldset>
+
+        <fieldset class="card">
           <legend>المعلومات</legend>
           <label class="field"><span>اسم المنتج *</span><input id="f-title" dir="auto" maxlength="120" required></label>
           <label class="field"><span>الماركة</span><input id="f-brand" dir="auto" maxlength="60" placeholder="AMANI PARFUMS"></label>
@@ -245,6 +258,8 @@
   </div>
 
   <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/*" hidden>
+  <input type="file" id="galleryInput" accept="image/jpeg,image/png,image/webp,image/*" multiple hidden>
+  <input type="file" id="videoInput" accept="video/mp4,video/quicktime,video/webm,video/*" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

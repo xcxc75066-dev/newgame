@@ -865,6 +865,77 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self._write_body(body)
 
+    def _send_ranged(self, path: Path, content_type: str) -> None:
+        """Serve a video in pieces (HTTP Range): iPhones refuse videos without it."""
+        size = path.stat().st_size
+        start, end, status = 0, size - 1, HTTPStatus.OK
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", (self.headers.get("Range") or "").strip())
+        if match and (match.group(1) or match.group(2)):
+            if match.group(1):
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else size - 1
+            else:
+                start = max(0, size - int(match.group(2)))
+            end = min(end, size - 1)
+            if start >= size or start > end:
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            status = HTTPStatus.PARTIAL_CONTENT
+        length = end - start + 1
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if status == HTTPStatus.PARTIAL_CONTENT:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        try:
+            with path.open("rb") as handle:
+                handle.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = handle.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the viewer scrolled away; normal for videos
+
+    def _save_body_to_file(self, path: Path, limit: int) -> int:
+        """Stream a big upload to disk instead of keeping it in memory."""
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            raise CmsError(400, "طلب غير صالح.") from None
+        if length <= 0:
+            raise CmsError(400, "الملف فارغ.")
+        if length > limit:
+            raise CmsError(413, f"الفيديو كبير بزاف (الحد {limit // (1024 * 1024)} ميغا).")
+        received = 0
+        try:
+            with path.open("wb") as handle:
+                while received < length:
+                    chunk = self.rfile.read(min(1024 * 1024, length - received))
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    received += len(chunk)
+        except OSError:
+            path.unlink(missing_ok=True)
+            raise
+        if received != length:
+            path.unlink(missing_ok=True)
+            raise CmsError(400, "الرفع تقطع. عاود جرب.")
+        return received
+
     def _ip_is_allowed(self, client_ip: str) -> bool:
         """current-ip.html holds one allowed IP per line (lines starting with # are ignored)."""
         ip_file = self.server.config.html_file.parent / "current-ip.html"
@@ -1064,6 +1135,23 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                     raise CmsError(502, "ما قدرناش نصيفطو التقرير لـ Telegram. حاول من بعد.")
                 self._send_cms(HTTPStatus.OK, {"ok": True})
                 return
+            if path == "/api/cms/upload-video" and method == "POST":
+                videos = cms.videos
+                if not videos.available():
+                    raise CmsError(503, "أداة الفيديو (ffmpeg) ما مثبتاش فالسيرفر. عاود أمر الإعداد.")
+                incoming = videos.incoming_path()
+                self._save_body_to_file(incoming, cms_backend.MAX_VIDEO_UPLOAD_BYTES)
+                if not videos.looks_like_video(incoming):
+                    incoming.unlink(missing_ok=True)
+                    raise CmsError(415, "هاد الملف ماشي فيديو. استعمل MP4 ولا MOV.")
+                self._send_cms(HTTPStatus.ACCEPTED, {"ok": True, "job": videos.submit(incoming)})
+                return
+            if path == "/api/cms/video-status" and method == "GET":
+                job = cms.videos.status((query.get("job") or [""])[0])
+                if job is None:
+                    raise CmsError(404, "ما لقيناش هاد الفيديو. عاود ارفعو.")
+                self._send_cms(HTTPStatus.OK, {"ok": True, **job})
+                return
             if path == "/api/cms/history" and method == "GET":
                 self._send_cms(HTTPStatus.OK, {"ok": True, "items": cms.content.history()})
                 return
@@ -1194,7 +1282,10 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
                 return
             content_type = STATIC_CONTENT_TYPES["." + upload.suffix.lower().lstrip(".")]
-            self._send_file(upload, content_type, "public, max-age=31536000, immutable")
+            if upload.suffix.lower() == ".mp4":
+                self._send_ranged(upload, content_type)
+            else:
+                self._send_file(upload, content_type, "public, max-age=31536000, immutable")
             return
         if path.startswith("/api/cms/"):
             self._handle_cms("GET", path, query)

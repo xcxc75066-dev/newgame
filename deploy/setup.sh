@@ -32,7 +32,7 @@ fi
 say "1/7 Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q git python3 sqlite3 curl ufw ca-certificates gnupg
+apt-get install -y -q git python3 sqlite3 curl ufw ca-certificates gnupg ffmpeg
 if ! apt-get install -y -q caddy; then
     # Older Ubuntu: use Caddy's official package repository.
     curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key \

@@ -1566,6 +1566,96 @@
         }
         .qm-close-btn:hover { color: var(--primary-green); }
 
+        /* Product photos + video */
+        .qm-media {
+            width: min(100%, 420px);
+            margin: 16px auto 22px;
+            direction: ltr;
+        }
+        .qm-media-track {
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            scrollbar-width: none;
+            aspect-ratio: 1 / 1;
+            border-radius: 18px;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+        }
+        .qm-media-track::-webkit-scrollbar { display: none; }
+        .qm-slide {
+            flex: 0 0 100%;
+            height: 100%;
+            position: relative;
+            scroll-snap-align: center;
+        }
+        .qm-slide img,
+        .qm-slide video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .qm-slide video { background: #000000; cursor: pointer; }
+        .qm-sound {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 0;
+            background: rgba(0, 0, 0, 0.55);
+            color: #ffffff;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .qm-media-dots {
+            display: flex;
+            justify-content: center;
+            gap: 2px;
+            margin-top: 8px;
+        }
+        .qm-dot {
+            width: 26px;
+            height: 26px;
+            border: 0;
+            padding: 0;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .qm-dot::after {
+            content: "";
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: var(--border-color);
+            transition: width 0.2s ease, background 0.2s ease;
+        }
+        .qm-dot.active::after {
+            width: 20px;
+            background: var(--primary-green);
+        }
+        .card-video-badge {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 8;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.6);
+            color: #ffffff;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
         .qm-img-box {
             width: 180px;
             height: 180px;
@@ -2119,8 +2209,10 @@
         <div class="qm-modal-card">
             <i class="fa-solid fa-xmark qm-close-btn" onclick="closeQuickSelectModal()"></i>
 
-            <div class="qm-img-box">
-                <img id="qmMainImg" src="" alt="">
+            <!-- Photos + video, swipe like Instagram. Filled by renderQmMedia(). -->
+            <div class="qm-media">
+                <div class="qm-media-track" id="qmMediaTrack"></div>
+                <div class="qm-media-dots" id="qmMediaDots" hidden></div>
             </div>
 
             <h3 class="qm-title" id="qmTitle">Solar Windmill Air Freshener</h3>
@@ -3282,6 +3374,10 @@
                 badges: Array.isArray(product.badges) ? product.badges : (product.badge ? [{ label: String(product.badge), position: 'top-left', background: '#111111', textColor: '#ffffff' }] : []),
                 sections: Array.isArray(product.sections) ? product.sections.map(section => String(section).toLowerCase()) : [],
                 colors: Array.isArray(product.colors) ? product.colors : [],
+                gallery: Array.isArray(product.gallery) ? product.gallery.filter(url => typeof url === 'string' && url) : [],
+                video: product.video && typeof product.video.src === 'string'
+                    ? { src: product.video.src, poster: String(product.video.poster || '') }
+                    : null,
                 clickCount: 0,
                 order: Number(product.order || 999999),
                 addedAt: String(product.addedAt || ''),
@@ -3473,10 +3569,15 @@
             card.setAttribute('data-oldprice', String(product.oldPrice || ''));
             card.setAttribute('data-description', product.description);
             card.setAttribute('data-colors', JSON.stringify(colors));
+            card.setAttribute('data-gallery', JSON.stringify(product.gallery));
+            if (product.video) {
+                card.setAttribute('data-video', product.video.src);
+                card.setAttribute('data-poster', product.video.poster);
+            }
             card.setAttribute('data-source-file', product.sourceFile);
             card.setAttribute('data-order', String(product.order));
             card.innerHTML = `
-                <div class="card-slide"><img src="${jsonEscape(product.image)}" class="product-image" alt="${jsonEscape(product.title)}" loading="lazy">${badgeMarkup}</div>
+                <div class="card-slide"><img src="${jsonEscape(product.image)}" class="product-image" alt="${jsonEscape(product.title)}" loading="lazy">${badgeMarkup}${product.video ? '<span class="card-video-badge" aria-label="Video"><i class="fa-solid fa-play"></i></span>' : ''}</div>
                 <div class="product-info">
                     <span class="brand-name notranslate">${jsonEscape(product.brand)}</span>
                     <h3 class="product-title">${jsonEscape(product.title)}</h3>
@@ -4229,7 +4330,7 @@
 
             document.getElementById('qmTitle').innerText = title;
             document.querySelector('.qm-description').innerHTML = desc;
-            document.getElementById('qmMainImg').src = img;
+            renderQmMedia(prod, img);
             document.getElementById('qmQtyVal').innerText = currentQty;
             renderQmVariants();
             updateQmPriceDisplay();
@@ -4245,13 +4346,125 @@
             if (!option || option.soldOut) return;
 
             selectedVariants[groupIndex] = optionIndex;
-            if (option.img) document.getElementById('qmMainImg').src = option.img;
+            if (option.img) {
+                const main = document.getElementById('qmMainImg');
+                if (main) {
+                    main.src = option.img;
+                    scrollQmMedia([...main.parentElement.parentElement.children].indexOf(main.parentElement));
+                }
+            }
             renderQmVariants();
             updateQmPriceDisplay();
         }
 
 
+        // --- PRODUCT MEDIA: video first (muted, loops, tap for sound), then photos ---
+        function readJsonAttribute(element, name, fallback) {
+            try {
+                const value = JSON.parse(element.getAttribute(name) || 'null');
+                return value ?? fallback;
+            } catch (_) {
+                return fallback;
+            }
+        }
+
+        function stopQmVideo() {
+            const video = document.getElementById('qmVideo');
+            if (!video) return;
+            video.pause();
+            video.removeAttribute('src');
+            video.load(); // stops downloading
+        }
+
+        function setSoundIcon(button, muted) {
+            button.replaceChildren();
+            const iconEl = document.createElement('i');
+            iconEl.className = muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
+            button.appendChild(iconEl);
+            button.setAttribute('aria-label', muted ? 'Sound on' : 'Sound off');
+        }
+
+        function renderQmMedia(prod, mainImage) {
+            const track = document.getElementById('qmMediaTrack');
+            const dots = document.getElementById('qmMediaDots');
+            if (!track || !dots) return;
+            stopQmVideo();
+            const gallery = readJsonAttribute(prod, 'data-gallery', []).filter(url => typeof url === 'string' && url);
+            const videoSrc = prod.getAttribute('data-video') || '';
+            const poster = prod.getAttribute('data-poster') || '';
+            const slides = [];
+            if (videoSrc) {
+                const slide = document.createElement('div');
+                slide.className = 'qm-slide qm-video-slide';
+                const video = document.createElement('video');
+                video.id = 'qmVideo';
+                video.muted = true;
+                video.loop = true;
+                video.playsInline = true;
+                video.setAttribute('muted', '');
+                video.setAttribute('playsinline', '');
+                video.preload = 'metadata';
+                if (poster) video.poster = poster;
+                video.src = videoSrc;
+                const sound = document.createElement('button');
+                sound.type = 'button';
+                sound.className = 'qm-sound';
+                setSoundIcon(sound, true);
+                const toggleSound = () => {
+                    video.muted = !video.muted;
+                    setSoundIcon(sound, video.muted);
+                    if (video.paused) video.play().catch(() => {});
+                };
+                sound.addEventListener('click', (event) => { event.stopPropagation(); toggleSound(); });
+                video.addEventListener('click', toggleSound);
+                slide.append(video, sound);
+                slides.push(slide);
+            }
+            [mainImage, ...gallery].forEach((src, index) => {
+                if (!src) return;
+                const slide = document.createElement('div');
+                slide.className = 'qm-slide';
+                const image = document.createElement('img');
+                image.src = src;
+                image.alt = '';
+                image.loading = index ? 'lazy' : 'eager';
+                if (index === 0) image.id = 'qmMainImg';
+                slide.appendChild(image);
+                slides.push(slide);
+            });
+            track.replaceChildren(...slides);
+            track.scrollLeft = 0;
+            dots.replaceChildren(...slides.map((_, index) => {
+                const dot = document.createElement('button');
+                dot.type = 'button';
+                dot.className = `qm-dot${index === 0 ? ' active' : ''}`;
+                dot.setAttribute('aria-label', `${index + 1} / ${slides.length}`);
+                dot.addEventListener('click', () => scrollQmMedia(index));
+                return dot;
+            }));
+            dots.hidden = slides.length < 2;
+            const video = document.getElementById('qmVideo');
+            if (video) video.play().catch(() => {});
+        }
+
+        function scrollQmMedia(index) {
+            const track = document.getElementById('qmMediaTrack');
+            if (track && index >= 0) track.scrollTo({ left: index * track.clientWidth, behavior: 'smooth' });
+        }
+
+        document.getElementById('qmMediaTrack')?.addEventListener('scroll', () => {
+            const track = document.getElementById('qmMediaTrack');
+            const index = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+            document.querySelectorAll('#qmMediaDots .qm-dot').forEach((dot, i) => dot.classList.toggle('active', i === index));
+            const video = document.getElementById('qmVideo');
+            if (video) {
+                if (index === 0) video.play().catch(() => {});
+                else video.pause();
+            }
+        }, { passive: true });
+
         function closeQuickSelectModal(options = {}) {
+            stopQmVideo();
             document.getElementById('quickSelectModal').classList.remove('active');
             document.body.style.overflow = '';
             if (options.clearProductRoute !== false && getDirectProductIdFromPath()) {

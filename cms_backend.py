@@ -23,6 +23,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import time
@@ -47,7 +48,12 @@ HISTORY_KEEP = 60
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 BADGE_POSITIONS = ("top-left", "top-right", "bottom-left", "bottom-right")
 KNOWN_SECTIONS = ("popular", "related", "offers")
-UPLOAD_NAME_PATTERN = re.compile(r"^[a-f0-9]{24}\.(?:jpg|png|webp)$")
+UPLOAD_NAME_PATTERN = re.compile(r"^[a-f0-9]{24}\.(?:jpg|png|webp|mp4)$")
+VIDEO_SRC_PATTERN = re.compile(r"^/uploads/[a-f0-9]{24}\.mp4$")
+VIDEO_POSTER_PATTERN = re.compile(r"^/uploads/[a-f0-9]{24}\.jpg$")
+MAX_GALLERY_IMAGES = 8
+MAX_VIDEO_UPLOAD_BYTES = 400 * 1024 * 1024
+MAX_VIDEO_SECONDS = 60
 HISTORY_NAME_PATTERN = re.compile(r"^products-\d{8}T\d{12}Z\.json$")
 HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
@@ -347,6 +353,24 @@ def clean_product(
             raise CmsError(400, f"{label}: كل خيارات «{group_name}» نافدة؛ اترك خياراً واحداً متوفراً أو أخفِ المنتج.")
         clean_groups.append({"name": group_name, "options": clean_options})
 
+    gallery = raw.get("gallery") or []
+    if not isinstance(gallery, list) or len(gallery) > MAX_GALLERY_IMAGES:
+        raise CmsError(400, f"{label}: الحد الأقصى {MAX_GALLERY_IMAGES} صور إضافية.")
+    clean_gallery = [
+        _image_url(url, f"{label} - صورة إضافية رقم {n}", required=True)
+        for n, url in enumerate(gallery, start=1)
+    ]
+    video = raw.get("video")
+    clean_video = None
+    if video:
+        src = str(video.get("src") or "") if isinstance(video, dict) else ""
+        poster = str(video.get("poster") or "") if isinstance(video, dict) else ""
+        if not VIDEO_SRC_PATTERN.fullmatch(src):
+            raise CmsError(400, f"{label}: الفيديو خاصو يكون مرفوع من الـ CMS.")
+        if poster and not VIDEO_POSTER_PATTERN.fullmatch(poster):
+            raise CmsError(400, f"{label}: صورة الفيديو غير صالحة.")
+        clean_video = {"src": src, "poster": poster}
+
     sections = raw.get("sections")
     if isinstance(sections, list):
         sections = [s for s in (str(x).lower() for x in sections) if s in KNOWN_SECTIONS]
@@ -363,6 +387,8 @@ def clean_product(
         "oldPrice": old_price,
         "description": _text(raw.get("description"), f"{label} - الوصف", max_length=2000, required=False, multiline=True),
         "image": _image_url(raw.get("image"), f"{label} - الصورة", required=True),
+        "gallery": clean_gallery,
+        "video": clean_video,
         "sections": sections,
         "badges": clean_badges,
         "colors": clean_groups,
@@ -614,12 +640,103 @@ class ContentStore:
         return path if path.is_file() else None
 
 
+# ----------------------------------------------------------------------- video
+class VideoProcessor:
+    """Turns a phone video into a small web video (in the background).
+
+    720p H.264 + AAC, at most 60 seconds, "faststart" so it plays while loading,
+    every metadata tag removed (phones store the GPS location in videos), plus a
+    poster image. One video at a time so the small server stays responsive.
+    """
+
+    def __init__(self, uploads_dir: Path) -> None:
+        self.uploads_dir = uploads_dir
+        self.incoming_dir = uploads_dir / ".incoming"
+        self.incoming_dir.mkdir(parents=True, exist_ok=True)
+        self._jobs: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+        self._one_at_a_time = threading.Semaphore(1)
+
+    @staticmethod
+    def available() -> bool:
+        return shutil.which("ffmpeg") is not None
+
+    def incoming_path(self) -> Path:
+        return self.incoming_dir / f"{secrets.token_hex(12)}.upload"
+
+    @staticmethod
+    def looks_like_video(path: Path) -> bool:
+        with path.open("rb") as handle:
+            head = handle.read(16)
+        return head[4:8] == b"ftyp" or head.startswith(b"\x1aE\xdf\xa3")  # MP4/MOV or WebM
+
+    def submit(self, source: Path) -> str:
+        job_id = secrets.token_hex(8)
+        with self._lock:
+            # keep the job list small: forget finished jobs older than an hour
+            cutoff = time.time() - 3600
+            for key in [k for k, v in self._jobs.items() if v.get("finished", time.time()) < cutoff]:
+                self._jobs.pop(key, None)
+            self._jobs[job_id] = {"status": "processing", "started": time.time()}
+        threading.Thread(target=self._run, args=(job_id, source), daemon=True).start()
+        return job_id
+
+    def status(self, job_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            job = self._jobs.get(str(job_id or ""))
+            return dict(job) if job else None
+
+    def _finish(self, job_id: str, **result: Any) -> None:
+        with self._lock:
+            self._jobs[job_id] = {**result, "finished": time.time()}
+
+    def _run(self, job_id: str, source: Path) -> None:
+        name = secrets.token_hex(12)
+        output = self.uploads_dir / f"{name}.mp4"
+        poster = self.uploads_dir / f"{name}.jpg"
+        temp = self.uploads_dir / f".{name}.tmp.mp4"
+        nice = ["nice", "-n", "10"] if shutil.which("nice") else []
+        try:
+            with self._one_at_a_time:
+                encode = nice + [
+                    "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+                    "-t", str(MAX_VIDEO_SECONDS), "-map_metadata", "-1", "-map", "0:v:0", "-map", "0:a:0?",
+                    "-vf", "scale='if(gt(iw,ih),-2,min(720,iw))':'if(gt(iw,ih),min(720,ih),-2)',fps=30",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-pix_fmt", "yuv420p",
+                    "-profile:v", "main", "-movflags", "+faststart",
+                    "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-f", "mp4", str(temp),
+                ]
+                result = subprocess.run(encode, capture_output=True, timeout=900, check=False)
+                if result.returncode != 0 or not temp.is_file() or temp.stat().st_size == 0:
+                    raise RuntimeError("encode failed")
+                os.replace(temp, output)
+                for seek in ("1", "0"):
+                    grab = nice + [
+                        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-ss", seek,
+                        "-i", str(output), "-frames:v", "1", "-q:v", "4", str(poster),
+                    ]
+                    subprocess.run(grab, capture_output=True, timeout=120, check=False)
+                    if poster.is_file() and poster.stat().st_size > 0:
+                        break
+            self._finish(
+                job_id, status="done", src=f"/uploads/{output.name}",
+                poster=f"/uploads/{poster.name}" if poster.is_file() else "",
+                size=output.stat().st_size,
+            )
+        except Exception:  # noqa: BLE001 - report a clear message, never crash the server
+            temp.unlink(missing_ok=True)
+            self._finish(job_id, status="error", message="ما قدرناش نجهزو هاد الفيديو. جرب فيديو آخر (MP4 ولا MOV).")
+        finally:
+            source.unlink(missing_ok=True)
+
+
 # --------------------------------------------------------------------- service
 class CmsService:
     def __init__(self, database_path: Path, data_dir: Path, seed_products_dir: Path) -> None:
         self.limiter = LoginLimiter()
         self.sessions = SessionStore(database_path)
         self.content = ContentStore(data_dir, seed_products_dir)
+        self.videos = VideoProcessor(self.content.uploads_dir)
 
     @staticmethod
     def _password_hash() -> str:

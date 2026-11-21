@@ -91,7 +91,11 @@
     city: '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-4h6v4"/>',
     ruler: '<path d="M3 17 17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    telegram: '<path d="M21 4 3 11l6 2 2 6 3-4 5 4z"/><path d="m9 13 9-6"/>'
+    telegram: '<path d="M21 4 3 11l6 2 2 6 3-4 5 4z"/><path d="m9 13 9-6"/>',
+    video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>',
+    play: '<path d="M7 4v16l13-8z" fill="currentColor"/>',
+    left: '<path d="m15 18-6-6 6-6"/>',
+    right: '<path d="m9 18 6-6-6-6"/>'
   };
 
   function icon(name) {
@@ -125,7 +129,8 @@
     tab: 'home',
     productFilter: 'all',
     orders: { status: 'pending', offset: 0, items: [], counts: {} },
-    uploadTarget: null
+    uploadTarget: null,
+    videoBusy: null // { percent, label } while a video uploads / converts
   };
 
   const $ = (id) => document.getElementById(id);
@@ -517,7 +522,8 @@
           h('div', { class: 'media-tags' },
             product.hidden ? h('span', { class: 'mtag hidden-tag', text: 'مخفي' }) : null,
             isNewProduct(product) ? h('span', { class: 'mtag new', text: 'جديد' }) : null,
-            isBestOffer(product) ? h('span', { class: 'mtag offer', text: `-${saving(product)} DH` }) : null)),
+            isBestOffer(product) ? h('span', { class: 'mtag offer', text: `-${saving(product)} DH` }) : null,
+            product.video ? h('span', { class: 'mtag', text: '▶ فيديو' }) : null)),
         h('div', { class: 'product-info' },
           h('b', { text: product.title }),
           h('div', { class: 'price-line' },
@@ -604,6 +610,8 @@
     const draft = isNew ? newProduct() : clone(state.lists[list][index]);
     draft.colors = draft.colors || [];
     draft.badges = draft.badges || [];
+    draft.gallery = Array.isArray(draft.gallery) ? draft.gallery : [];
+    draft.video = draft.video && draft.video.src ? draft.video : null;
     state.editing = { list, index, draft };
     state.dirty = false;
 
@@ -622,6 +630,8 @@
     document.querySelectorAll('#editorForm .invalid').forEach((el) => el.classList.remove('invalid'));
 
     renderImagePreview();
+    renderGallery();
+    renderVideo();
     renderDiscount();
     renderGroups();
     renderBadges();
@@ -635,7 +645,9 @@
 
   function closeEditor(force = false) {
     if (!state.editing) return true;
+    if (state.videoBusy && !force && !confirm('الفيديو مازال كيتجهز. تخرج؟ غادي يضيع.')) return false;
     if (!force && state.dirty && !confirm('عندك تغييرات ما تسجلوش. تخرج بلا حفظ؟')) return false;
+    state.videoBusy = null;
     state.editing = null;
     state.dirty = false;
     $('editor').hidden = true;
@@ -870,6 +882,7 @@
 
   $('editorSave').addEventListener('click', async () => {
     const { list, index, draft } = state.editing;
+    if (state.videoBusy) { toast('تسنى حتى يكمل الفيديو، من بعد سجل.', 'error'); return; }
     const problems = validateDraft(draft);
     if (problems.length) {
       toast(problems[0], 'error');
@@ -929,6 +942,169 @@
       toast('تم رفع الصورة ✓', 'success');
     } catch (error) {
       toast(error.message || 'تعذر رفع الصورة.', 'error');
+    }
+  });
+
+  // ------------------------------------------------------- extra photos
+  const MAX_GALLERY = 8;
+
+  function renderGallery() {
+    const draft = state.editing.draft;
+    const items = draft.gallery;
+    const move = (from, to) => {
+      const [item] = items.splice(from, 1);
+      items.splice(to, 0, item);
+      markDirty();
+      renderGallery();
+    };
+    $('galleryEditor').replaceChildren(...items.map((url, index) => h('div', { class: 'gallery-item' },
+      h('img', { src: url, alt: '', loading: 'lazy', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
+      h('span', { class: 'gallery-num', text: String(index + 2) }),
+      h('div', { class: 'gallery-tools' },
+        h('button', { type: 'button', class: 'mini', 'aria-label': 'قدّم', disabled: index === 0, onclick: () => move(index, index - 1) }, icon('right')),
+        h('button', { type: 'button', class: 'mini', 'aria-label': 'أخّر', disabled: index === items.length - 1, onclick: () => move(index, index + 1) }, icon('left')),
+        h('button', { type: 'button', class: 'mini danger', 'aria-label': 'حيد الصورة', onclick: () => {
+          items.splice(index, 1);
+          markDirty();
+          renderGallery();
+        } }, icon('trash'))))));
+    const full = items.length >= MAX_GALLERY;
+    $('addGalleryBtn').disabled = full;
+    $('addGalleryBtn').lastChild.textContent = full ? `وصلتي للحد (${MAX_GALLERY} صور)` : `زيد صور (${items.length}/${MAX_GALLERY})`;
+  }
+
+  $('addGalleryBtn').addEventListener('click', () => {
+    $('galleryInput').value = '';
+    $('galleryInput').click();
+  });
+
+  $('galleryInput').addEventListener('change', async () => {
+    if (!state.editing) return;
+    const draft = state.editing.draft;
+    const room = MAX_GALLERY - draft.gallery.length;
+    const files = [...$('galleryInput').files].slice(0, Math.max(0, room));
+    if (!files.length) return;
+    const button = $('addGalleryBtn');
+    button.disabled = true;
+    let done = 0;
+    for (const file of files) {
+      button.lastChild.textContent = `جاري الرفع ${done + 1}/${files.length}…`;
+      try {
+        const blob = await shrinkImage(file);
+        const data = await api('/upload', { method: 'POST', raw: blob, contentType: blob.type || 'image/jpeg' });
+        if (state.editing && state.editing.draft === draft) {
+          draft.gallery.push(data.url);
+          markDirty();
+          done += 1;
+        }
+      } catch (error) {
+        toast(error.message || 'تعذر رفع صورة.', 'error');
+      }
+    }
+    if (state.editing && state.editing.draft === draft) renderGallery();
+    if (done) toast(`تزادو ${done} صور ✓ ما تنساش تسجل`, 'success');
+  });
+
+  // -------------------------------------------------------------- video
+  function renderVideo() {
+    const draft = state.editing.draft;
+    const box = $('videoEditor');
+    const busy = state.videoBusy;
+    if (busy) {
+      box.replaceChildren(h('div', { class: 'video-progress' },
+        h('div', { class: 'progress' }, h('i', { style: `width:${busy.percent}%` })),
+        h('p', { class: 'note', text: busy.label })));
+      return;
+    }
+    if (!draft.video) {
+      box.replaceChildren(h('button', { type: 'button', class: 'btn secondary block', onclick: () => {
+        $('videoInput').value = '';
+        $('videoInput').click();
+      } }, icon('video'), 'رفع فيديو'));
+      return;
+    }
+    const video = h('video', { class: 'video-preview', src: draft.video.src, controls: true, playsinline: true, preload: 'metadata' });
+    video.muted = true;
+    if (draft.video.poster) video.poster = draft.video.poster;
+    box.replaceChildren(video, h('div', { class: 'grid-2' },
+      h('button', { type: 'button', class: 'btn ghost block', onclick: () => {
+        $('videoInput').value = '';
+        $('videoInput').click();
+      } }, icon('refresh'), 'بدل الفيديو'),
+      h('button', { type: 'button', class: 'btn danger block', onclick: () => {
+        if (!confirm('تحيد الفيديو من هاد المنتوج؟')) return;
+        draft.video = null;
+        markDirty();
+        renderVideo();
+      } }, icon('trash'), 'حيد الفيديو')));
+  }
+
+  function setVideoBusy(percent, label) {
+    state.videoBusy = { percent: Math.max(0, Math.min(100, Math.round(percent))), label };
+    if (state.editing) renderVideo();
+  }
+
+  // XHR (not fetch) so we can show the upload progress.
+  function uploadVideoFile(file) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API}/upload-video`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader('X-Amani-CMS', '1');
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) setVideoBusy((event.loaded / event.total) * 70, `جاري رفع الفيديو… ${Math.round((event.loaded / event.total) * 100)}%`);
+      };
+      xhr.onerror = () => reject(new Error('انقطع الاتصال. عاود جرب.'));
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) { data = {}; }
+        if (xhr.status === 401) showLogin(data.message || '');
+        if (xhr.status >= 200 && xhr.status < 300 && data.job) resolve(data.job);
+        else reject(new Error(data.message || 'تعذر رفع الفيديو.'));
+      };
+      xhr.send(file);
+    });
+  }
+
+  async function waitForVideo(job) {
+    const started = Date.now();
+    let percent = 72;
+    while (Date.now() - started < 15 * 60 * 1000) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (!state.videoBusy) return null; // editor closed
+      const data = await api(`/video-status?job=${encodeURIComponent(job)}`);
+      if (data.status === 'done') return data;
+      if (data.status === 'error') throw new Error(data.message || 'تعذر تجهيز الفيديو.');
+      percent = Math.min(98, percent + 2);
+      setVideoBusy(percent, 'كنجهزو الفيديو باش يخدم مزيان فالتيليفون… (دقيقة ولا جوج)');
+    }
+    throw new Error('الفيديو طول بزاف. جرب فيديو أقصر.');
+  }
+
+  $('videoInput').addEventListener('change', async () => {
+    const file = $('videoInput').files[0];
+    if (!file || !state.editing) return;
+    const draft = state.editing.draft;
+    if (file.size > 400 * 1024 * 1024) { toast('الفيديو كبير بزاف (أكثر من 400MB). قصّو شوية.', 'error'); return; }
+    setVideoBusy(0, 'جاري رفع الفيديو… 0%');
+    try {
+      const job = await uploadVideoFile(file);
+      setVideoBusy(72, 'كنجهزو الفيديو باش يخدم مزيان فالتيليفون… (دقيقة ولا جوج)');
+      const result = await waitForVideo(job);
+      if (!result) return;
+      state.videoBusy = null;
+      if (state.editing && state.editing.draft === draft) {
+        draft.video = { src: result.src, poster: result.poster || '' };
+        markDirty();
+        renderVideo();
+        toast('الفيديو واجد ✓ ما تنساش تسجل', 'success');
+      }
+    } catch (error) {
+      state.videoBusy = null;
+      if (state.editing) renderVideo();
+      toast(error.message || 'تعذر رفع الفيديو.', 'error');
     }
   });
 

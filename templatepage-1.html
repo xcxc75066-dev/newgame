@@ -1966,9 +1966,15 @@
 
         .toast-notification {
             position: fixed;
-            bottom: -100px;
+            bottom: calc(24px + env(safe-area-inset-bottom));
             left: 50%;
-            transform: translateX(-50%);
+            transform: translate(-50%, calc(100% + 60px));
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            width: max-content;
+            max-width: calc(100vw - 32px);
+            text-align: center;
             background-color: #333;
             color: white;
             padding: 12px 25px;
@@ -1979,11 +1985,16 @@
             align-items: center;
             gap: 10px;
             z-index: 2000;
-            transition: bottom 0.4s ease;
+            transition: transform 0.4s ease, opacity 0.3s ease, visibility 0s linear 0.4s;
             box-shadow: 0 5px 15px rgba(0,0,0,0.2);
             direction: ltr;
         }
-        .toast-notification.show { bottom: 30px; }
+        .toast-notification.show {
+            transform: translate(-50%, 0);
+            opacity: 1;
+            visibility: visible;
+            transition: transform 0.4s ease, opacity 0.3s ease, visibility 0s;
+        }
 
         /* Footer */
         .site-footer {
@@ -2233,8 +2244,8 @@
 
             <h3 class="qm-title" id="qmTitle">Solar Windmill Air Freshener</h3>
             <div class="qm-price-wrap">
-                <span class="qm-current-price" id="qmPrice">99 DH</span>
-                <span class="qm-old-price" id="qmOldPrice">149 DH</span>
+                <span class="qm-current-price notranslate" id="qmPrice">99 DH</span>
+                <span class="qm-old-price notranslate" id="qmOldPrice">149 DH</span>
             </div>
 
             <p class="qm-description">
@@ -2251,7 +2262,7 @@
             </div>
 
             <button class="qm-submit-btn" id="qmSubmitBtn" onclick="confirmQuickSelection()">
-                Add to Cart • <span id="qmTotalPrice">99 DH</span> <i class="fa-solid fa-bag-shopping"></i>
+                Add to Cart • <span id="qmTotalPrice" class="notranslate">99 DH</span> <i class="fa-solid fa-bag-shopping"></i>
             </button>
         </div>
     </div>
@@ -2299,7 +2310,7 @@
 
             <div class="cart-total-row" id="cartTotalRow">
                 <span>Total:</span>
-                <span><span id="cartTotal">0</span> DH</span>
+                <span class="notranslate"><span id="cartTotal">0</span> DH</span>
             </div>
             <div class="cart-buttons">
                 <button class="btn-confirm" id="btnConfirm" onclick="confirmOrder()">Confirm Order</button>
@@ -3597,8 +3608,8 @@
                 <div class="product-info">
                     <span class="brand-name notranslate">${jsonEscape(product.brand)}</span>
                     <h3 class="product-title">${jsonEscape(product.title)}</h3>
-                    <span class="current-price">${jsonEscape(product.price)} DH</span>
-                    <span class="old-price">${oldPrice ? `${jsonEscape(oldPrice)} DH` : ''}</span>
+                    <span class="current-price notranslate">${jsonEscape(product.price)} DH</span>
+                    <span class="old-price notranslate">${oldPrice ? `${jsonEscape(oldPrice)} DH` : ''}</span>
                     <button class="buy-btn" onclick="openProductFromButton(this)">ADD TO CART</button>
                 </div>
             `;
@@ -4727,9 +4738,9 @@
                     <div class="cart-detail-item-info">
                         <div class="cart-detail-item-title">${item.title}</div>
                         <div class="cart-detail-item-variants">${formatCartVariants(item)}</div>
-                        <div class="cart-detail-item-meta">Quantity: ${item.qty} · ${item.price} DH / item</div>
+                        <div class="cart-detail-item-meta">Quantity: ${item.qty} · <span class="notranslate">${item.price} DH</span> / item</div>
                     </div>
-                    <div class="cart-detail-item-total">${itemTotal} DH</div>
+                    <div class="cart-detail-item-total notranslate">${itemTotal} DH</div>
                     <button type="button" class="cart-detail-remove" onclick="removeCartItem('${key}')" title="Remove item" aria-label="Remove item">
                         <i class="fa-solid fa-xmark"></i>
                     </button>
@@ -4784,7 +4795,7 @@
                             <div class="cart-item-info">
                                 <div class="cart-item-title">${item.title}</div>
                                 <div class="cart-item-color">${formatCartVariants(item)}</div>
-                                <div class="cart-item-price">${itemTotal} DH (${item.price} DH / item)</div>
+                                <div class="cart-item-price"><span class="notranslate">${itemTotal} DH</span> (<span class="notranslate">${item.price} DH</span> / item)</div>
                                 <div class="cart-item-qty">Quantity: ${item.qty}</div>
                             </div>
                             <button class="remove-item-btn" onclick="removeCartItem('${key}')" title="Remove item">

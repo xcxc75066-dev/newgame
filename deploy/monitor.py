@@ -609,7 +609,7 @@ def classify(r):
         if d:
             return cat, d
     if host.endswith(".ma") or _domain_in(host, path, MA_PLATFORMS):
-        return "ma_store", host
+        return "ma_store", re.sub(r"^www\.", "", host)
     d = _domain_in(host, path, SHIPS_TO_MA)
     if d:
         return "ships_ma", d.split("/")[0]
@@ -620,7 +620,7 @@ def classify(r):
     if d:
         return "sourcing", d
     if ma:
-        return "other_ma", host
+        return "other_ma", re.sub(r"^www\.", "", host)
     d = _domain_in(host, path, GLOBAL_MARKETS)
     if d:
         return "global", d.strip(".")
@@ -714,24 +714,28 @@ def analyze(results, text="", seen=None):
 
     # 1) presence in Morocco (when Gemini checked the pictures, only "same model" counts)
     presence, breakdown = 0.0, []
-    similar, different = [], []
+    similar, different = {}, {}  # site -> how many results
+
+    def site_counts(items):
+        counts = {}
+        for h in items:
+            counts[h["dom"]] = counts.get(h["dom"], 0) + 1
+        return counts
+
     for cat, (first, nxt, cap) in PRESENCE_POINTS.items():
         hits = sorted(cats.get(cat, []), key=lambda x: -x["w"])
-        for h in hits:
-            if h.get("match") == "similar" and h["dom"] not in similar:
-                similar.append(h["dom"])
-            elif h.get("match") == "different" and h["dom"] not in different:
-                different.append(h["dom"])
+        for site, n in site_counts([h for h in hits if h.get("match") == "similar"]).items():
+            similar[site] = similar.get(site, 0) + n
+        for site, n in site_counts([h for h in hits if h.get("match") == "different"]).items():
+            different[site] = different.get(site, 0) + n
         hits = [h for h in hits if h.get("match") in (None, "same")]
         if not hits:
             continue
         pts = sum((first if i == 0 else nxt) * h["w"] for i, h in enumerate(hits[:cap]))
         presence += pts
-        doms = []
-        for h in hits:
-            if h["dom"] not in doms:
-                doms.append(h["dom"])
-        breakdown.append((cat, len(hits), round(pts), doms[:3]))
+        counts = site_counts(hits)
+        doms = [f"{d} ×{n}" if n > 1 else d for d, n in sorted(counts.items(), key=lambda x: -x[1])]
+        breakdown.append((cat, len(hits), round(pts), doms[:4]))
     presence = min(100, round(presence))
     checked = any(r.get("match") for r in results)
 
@@ -761,6 +765,8 @@ def analyze(results, text="", seen=None):
             except (TypeError, ValueError):
                 continue
             if cat in MA_CATS and h["cur"] == "MAD":
+                if h.get("match") in ("similar", "different"):
+                    continue  # another model: its price says nothing about ours
                 ma_prices.append(mad)
             elif cat == "sourcing":
                 wholesale.append(mad)
@@ -848,17 +854,23 @@ def analyze(results, text="", seen=None):
         adv.append(f"⭐ تقييمات مزيانة برا ({rating}/5، {reviews} تقييم): منتوج مجرب")
 
     # top links: Moroccan first, then global
-    top_ma = sorted((h for c in MA_CATS for h in cats.get(c, [])), key=lambda x: -x["w"])[:3]
+    order = {"same": 0, None: 1, "similar": 2}
+    top_ma = sorted((h for c in MA_CATS for h in cats.get(c, []) if h.get("match") != "different"),
+                    key=lambda x: (order.get(x.get("match"), 3), -x["w"]))[:4]
     top_gl = sorted(cats.get("global", []), key=lambda x: -x["w"])[:2]
 
     return {"ok": True, "n": n, "presence": presence, "breakdown": breakdown, "demand": demand,
-            "checked": checked, "similar": similar, "different": different,
+            "checked": checked,
+            "similar": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(similar.items(), key=lambda x: -x[1])],
+            "different": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(different.items(), key=lambda x: -x[1])],
             "gdoms": gdoms, "reviews": reviews, "rating": rating, "sp": sp,
             "ma_prices": ma_prices, "world_prices": world_prices, "wholesale": wholesale, "margin": margin,
             "margin_ref": margin_ref, "qty": qty, "capital": capital, "profit": profit, "brand": brand,
             "nch": nch, "reposted": reposted, "opp": opp,
             "verdict": verdict, "confidence": confidence, "advice": adv,
-            "top": [(h["dom"], h["title"], h["link"]) for h in top_ma + top_gl],
+            "top": [(h["dom"], h["title"], h["link"],
+                     {"same": "✅ ", "similar": "🟡 "}.get(h.get("match"), ""), h.get("pos"))
+                    for h in top_ma + top_gl],
             "titles": [r.get("title") or "" for r in sorted(results, key=lambda r: r.get("pos") or 99)[:20]]}
 
 
@@ -914,7 +926,7 @@ def build_report(rep, title):
     L.append(f"  ثمن المورد: {_money(rep['sp']) if rep['sp'] else 'ما لقيتوش فالنص'}")
     if rep["ma_prices"]:
         p = rep["ma_prices"]
-        L.append(f"  فالمغرب: {_range(p)}")
+        L.append(f"  فالمغرب{' (نفس الموديل)' if rep.get('checked') else ''}: {_range(p)}")
     if rep["world_prices"]:
         p = rep["world_prices"]
         L.append(f"  برا (تقريبي): {_range(p)}")
@@ -935,7 +947,8 @@ def build_report(rep, title):
         L += [f"  {a}" for a in rep["advice"]]
     if rep["top"]:
         L.append("\n🔗 أهم الروابط:")
-        L += [f"  • {d} — {t[:45]}\n    {l}" for d, t, l in rep["top"]]
+        L += [f"  • {mark}{d} — {t[:45]}" + (f" (رتبة {pos})" if pos else "") + f"\n    {l}"
+              for d, t, l, mark, pos in rep["top"]]
     L.append("\nℹ️ البحث بالتشابه ديال الصورة، يعني شوف الروابط قبل ما تقرر.")
     return "\n".join(L)
 

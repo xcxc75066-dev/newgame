@@ -2648,7 +2648,58 @@
             }
         }
 
-        new UltraSmoothSlider(document.getElementById('headphonesSlider'));
+        // Banner pictures come from the CMS (/api/banners). A category uses its
+        // own pictures, else the home ones. Never set in the CMS: the built-in
+        // pictures stay. Set but empty: no banner.
+        let bannerSlider = null;
+        async function initBannerSlider() {
+            const container = document.getElementById('headphonesSlider');
+            const wrapper = document.querySelector('.headphones-slider-wrapper');
+            if (!container) return;
+            let slides = null;
+            try {
+                const response = await fetch('/api/banners', { cache: 'no-store' });
+                const data = response.ok ? await response.json() : {};
+                if (data && data.banners) {
+                    const match = window.location.pathname.match(/^\/c\/([^/]+)\/?$/i);
+                    let categoryId = '';
+                    if (match) { try { categoryId = decodeURIComponent(match[1]); } catch (_) { categoryId = match[1]; } }
+                    const own = categoryId && Array.isArray(data.banners[categoryId]) ? data.banners[categoryId] : [];
+                    slides = own.length ? own : (Array.isArray(data.banners.home) ? data.banners.home : []);
+                }
+            } catch (_) { slides = null; }
+            if (slides) {
+                const track = container.querySelector('.hp-slider-track');
+                track.replaceChildren(...slides.map((slide, index) => {
+                    const holder = document.createElement('div');
+                    holder.className = 'hp-slide';
+                    const image = document.createElement('img');
+                    image.src = slide.image;
+                    image.alt = `Banner ${index + 1}`;
+                    image.loading = index ? 'lazy' : 'eager';
+                    if (slide.link) {
+                        const link = document.createElement('a');
+                        link.href = slide.link;
+                        link.addEventListener('click', (event) => {
+                            if (bannerSlider && bannerSlider.hasDragged) event.preventDefault();
+                        });
+                        link.appendChild(image);
+                        holder.appendChild(link);
+                    } else {
+                        holder.appendChild(image);
+                    }
+                    return holder;
+                }));
+                if (!slides.length && wrapper) {
+                    wrapper.dataset.empty = '1';
+                    wrapper.hidden = true;
+                }
+                const arrows = container.querySelectorAll('.hp-nav-arrow');
+                arrows.forEach(arrow => { arrow.hidden = slides.length < 2; });
+            }
+            bannerSlider = new UltraSmoothSlider(container);
+        }
+        initBannerSlider();
 
         // --- 2. DYNAMIC CATEGORIES ---
         // Keep a clean local copy so the sidebar remains usable when the
@@ -3412,6 +3463,7 @@
                 order: Number(product.order || 999999),
                 addedAt: String(product.addedAt || ''),
                 categories: Array.isArray(product.categories) ? product.categories.map(String) : [],
+                types: Array.isArray(product.types) ? product.types.map(String) : [],
                 sourceFile
             };
             return normalized;
@@ -3658,7 +3710,9 @@
                 ? jsonCatalog.new
                 : sectionName === 'offers'
                     ? sortOfferProducts(jsonCatalog.offers)
-                    : sortJsonProducts(jsonCatalog[sectionName]);
+                    : sectionName === 'related'
+                        ? jsonCatalog.related // already in the "dominant type first" order
+                        : sortJsonProducts(jsonCatalog[sectionName]);
             const start = fullPage ? page * JSON_PRODUCT_PAGE_SIZE : 0;
             const count = fullPage ? JSON_PRODUCT_PAGE_SIZE : 9;
             const visibleProducts = products.slice(start, start + count);
@@ -3700,25 +3754,48 @@
             if (!popularHeader || !productsGrid || !relatedSection || !offersSection) return;
 
             const isPopular = validPage === 'popular';
-            popularHeader.hidden = !isHome && !isPopular;
-            productsGrid.hidden = !isHome && !isPopular;
-            relatedSection.hidden = !isHome && validPage !== 'related';
-            // On the home page, hide Best Offers while no product qualifies.
-            offersSection.hidden = isHome ? !jsonCatalog.offers.length : validPage !== 'offers';
+            const isCategory = validPage === 'category';
+            const homeLike = isHome || isCategory; // a category page looks like the home page
+            applyCatalogScope(isCategory ? currentCategoryId : '');
+            popularHeader.hidden = !homeLike && !isPopular;
+            productsGrid.hidden = !homeLike && !isPopular;
+            relatedSection.hidden = !homeLike && validPage !== 'related';
+            // Hide Best Offers while no product qualifies.
+            offersSection.hidden = homeLike ? !jsonCatalog.offers.length : validPage !== 'offers';
             if (newsSection) newsSection.hidden = validPage !== 'new';
             const categorySection = document.getElementById('categorySection');
-            if (categorySection) categorySection.hidden = validPage !== 'category';
-            if (slider) slider.hidden = !isHome;
+            if (categorySection) categorySection.hidden = true;
+            if (slider) slider.hidden = !homeLike || slider.dataset.empty === '1';
             if (back) back.hidden = isHome;
             if (whatsNew) whatsNew.hidden = !isHome;
-            document.body.classList.toggle('catalog-page-full', !isHome && validPage !== 'new' && validPage !== 'category');
+            document.body.classList.toggle('catalog-page-full', !homeLike && validPage !== 'new');
+            const popularTitle = popularHeader.querySelector('.section-title');
+            const category = isCategory ? shopCategories.find(c => c.id === currentCategoryId) : null;
+            if (popularTitle) popularTitle.textContent = isCategory ? (category ? category.title : 'Category') : 'OUR POPULAR PRODUCTS';
+            ['popularViewMoreWrap', 'relatedViewMoreWrap', 'offersViewMoreWrap'].forEach(id => {
+                const wrap = document.getElementById(id);
+                if (wrap && isCategory) wrap.hidden = true;
+            });
 
             if (isHome) {
                 renderJsonSection('popular', 0, false);
                 renderJsonSection('related', 0, false);
                 renderJsonSection('offers', 0, false);
-            } else if (validPage === 'category') {
-                renderCategoryPage();
+            } else if (isCategory) {
+                // every product of the category, then related and offers
+                productsGrid.replaceChildren(...jsonCatalog.popular.map(productCardFromJson));
+                if (!jsonCatalog.popular.length) {
+                    const empty = document.createElement('p');
+                    empty.className = 'catalog-empty-message';
+                    empty.textContent = 'Products coming soon. Come back soon!';
+                    productsGrid.replaceChildren(empty);
+                }
+                renderJsonSection('related', 0, false);
+                renderJsonSection('offers', 0, false);
+                ['popularViewMoreWrap', 'relatedViewMoreWrap', 'offersViewMoreWrap'].forEach(id => {
+                    const wrap = document.getElementById(id);
+                    if (wrap) wrap.hidden = true;
+                });
             } else {
                 renderJsonSection(validPage, jsonCatalog.pages[validPage], true);
             }
@@ -3731,6 +3808,46 @@
                     window.history.pushState({}, '', nextUrl);
                 }
             }
+        }
+
+        // Related products: the types of the products on the page are counted;
+        // products of the most common type come first, then the next one...
+        // (products already shown above are skipped). Then the usual related
+        // products fill the rest so the section is never empty.
+        function relatedByTypes(basis, pool, fallback) {
+            const counts = new Map();
+            basis.forEach(product => (product.types || []).forEach(type => {
+                counts.set(type, (counts.get(type) || 0) + 1);
+            }));
+            const key = product => product.proId || product.id;
+            const used = new Set(basis.map(key));
+            const out = [];
+            const ranked = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a));
+            ranked.forEach(type => {
+                sortJsonProducts(pool.filter(product => !used.has(key(product)) && (product.types || []).includes(type)))
+                    .forEach(product => { used.add(key(product)); out.push(product); });
+            });
+            fallback.forEach(product => {
+                if (!used.has(key(product))) { used.add(key(product)); out.push(product); }
+            });
+            return out;
+        }
+
+        // The home page and the category pages share the same layout; only the
+        // products change. jsonCatalog.home keeps the home lists.
+        function applyCatalogScope(categoryId) {
+            const home = jsonCatalog.home;
+            if (!home) return;
+            if (!categoryId) {
+                jsonCatalog.popular = home.popular;
+                jsonCatalog.related = home.related;
+                jsonCatalog.offers = home.offers;
+                return;
+            }
+            const inCategory = jsonCatalog.all.filter(product => product.categories.includes(categoryId));
+            jsonCatalog.popular = sortJsonProducts(inCategory);
+            jsonCatalog.related = relatedByTypes(inCategory, jsonCatalog.all, home.related);
+            jsonCatalog.offers = home.offers.filter(product => product.categories.includes(categoryId));
         }
 
         function renderCategoryPage() {
@@ -3785,6 +3902,8 @@
             jsonCatalog.offers = sortOfferProducts(
                 allProducts.filter(product => productSaving(product) > BEST_OFFER_MIN_SAVING)
             );
+            jsonCatalog.related = relatedByTypes(jsonCatalog.popular, jsonCatalog.all, jsonCatalog.related);
+            jsonCatalog.home = { popular: jsonCatalog.popular, related: jsonCatalog.related, offers: jsonCatalog.offers };
             jsonCatalog.new = allProducts
                 .filter(product => isNewProduct(product))
                 .sort((first, second) => productAddedTime(second) - productAddedTime(first)

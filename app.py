@@ -1108,7 +1108,19 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 lists, version = cms.content.read()
                 self._send_cms(HTTPStatus.OK, {
                     "ok": True, "lists": lists, "version": version, "categories": cms.content.categories(),
+                    "types": cms.content.types(),
                 })
+                return
+            if path == "/api/cms/types" and method == "PUT":
+                types = cms.content.save_types(self._read_json().get("types"))
+                self._send_cms(HTTPStatus.OK, {"ok": True, "types": types})
+                return
+            if path == "/api/cms/banners" and method == "GET":
+                self._send_cms(HTTPStatus.OK, {"ok": True, "banners": cms.content.banners()})
+                return
+            if path == "/api/cms/banners" and method == "PUT":
+                banners = cms.content.save_banners(self._read_json().get("banners"))
+                self._send_cms(HTTPStatus.OK, {"ok": True, "banners": banners})
                 return
             if path == "/api/cms/products" and method == "PUT":
                 payload = self._read_json()
@@ -1188,7 +1200,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 return
             inbox = self.server.inbox
             if path == "/api/cms/inbox" and method == "GET":
-                self._send_cms(HTTPStatus.OK, {"ok": True, "items": inbox.items(), "categories": cms.content.categories()})
+                self._send_cms(HTTPStatus.OK, {"ok": True, "items": inbox.items(), "categories": cms.content.categories(),
+                                               "types": cms.content.types()})
                 return
             if path == "/api/cms/inbox/publish" and method == "POST":
                 self._send_cms(HTTPStatus.OK, {"ok": True, **inbox.publish(self._read_json())})
@@ -1349,6 +1362,10 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/categories":
             self._send_json({"ok": True, "categories": self.server.cms.content.public_categories()})
+            return
+        if path == "/api/banners":
+            # null = never set in the CMS: the shop keeps its built-in pictures
+            self._send_json({"ok": True, "banners": self.server.cms.content.banners()})
             return
 
         # ---------------------------------------------------------

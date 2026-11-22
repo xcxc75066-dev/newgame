@@ -1177,7 +1177,7 @@
   function inboxCard(item) {
     const form = {
       images: [...item.images], title: item.title, price: String(item.price), oldPrice: String(item.oldPrice || ''),
-      description: item.description || '', categories: [...(item.categories || [])], web: []
+      description: item.description || '', categories: [...(item.categories || [])]
     };
     const m = item.market || {};
     const card = h('article', { class: 'inbox-card' });
@@ -1197,25 +1197,6 @@
       h('span', { class: 'tick' }, icon(index >= 0 ? 'check' : 'close')));
     }));
     drawPhotos();
-
-    // pictures of the same product found by Google: off until you pick them
-    const webImages = item.web_images || [];
-    const webStrip = h('div', { class: 'photo-strip' });
-    const drawWeb = () => webStrip.replaceChildren(...webImages.map((picture, index) => {
-      const on = form.web.includes(index);
-      const tile = h('button', {
-        type: 'button', class: `pick-photo web${on ? '' : ' off'}`, 'aria-pressed': String(on), title: picture.title || '',
-        onclick: () => {
-          form.web = on ? form.web.filter((i) => i !== index) : [...form.web, index];
-          drawWeb();
-        }
-      }, h('img', { src: picture.thumb, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer',
-        onerror: () => { tile.hidden = true; } }),
-      picture.source ? h('span', { class: 'main-tag', text: picture.source }) : null,
-      h('span', { class: 'tick' }, icon(on ? 'check' : 'plus')));
-      return tile;
-    }));
-    drawWeb();
 
     const facts = [];
     if (m.score != null) facts.push(`🎯 فرصة ${Math.round(m.score)}/100`);
@@ -1253,18 +1234,16 @@
     const decide = async (hidden, button) => {
       if (!form.title.trim()) return toast('كتب سمية المنتوج', 'error');
       if (!(Number(form.price) > 0)) return toast('كتب الثمن', 'error');
-      if (!form.images.length && !form.web.length) return toast('ختار على الأقل تصويرة وحدة', 'error');
+      if (!form.images.length) return toast('ختار على الأقل تصويرة وحدة', 'error');
       if (!form.categories.length && state.inboxCategories.length && !confirm('ما ختاريتي حتى تصنيف. نزيدو بلا تصنيف؟')) return;
       button.disabled = true;
-      if (form.web.length) toast('كنجيب التصاور من Google…');
       try {
-        const result = await api('/inbox/publish', { method: 'POST', body: {
+        await api('/inbox/publish', { method: 'POST', body: {
           id: item.id, title: form.title.trim(), price: Number(form.price),
           oldPrice: form.oldPrice ? Number(form.oldPrice) : 0, description: form.description,
-          categories: form.categories, images: form.images, web: form.web, hidden
+          categories: form.categories, images: form.images, hidden
         } });
-        const missing = result.web_failed ? ` (${result.web_failed} تصاور من Google ما تجابوش)` : '';
-        toast((hidden ? 'تزاد مخفي ✓ تقدر تكملو من «المنتجات»' : 'تزاد للمتجر ✓ راه ظاهر دابا') + missing, 'success');
+        toast(hidden ? 'تزاد مخفي ✓ تقدر تكملو من «المنتجات»' : 'تزاد للمتجر ✓ راه ظاهر دابا', 'success');
         state.inbox = state.inbox.filter((x) => x.id !== item.id);
         setInboxCount(state.inbox.length);
         renderInbox();
@@ -1288,9 +1267,6 @@
 
     card.append(
       strip,
-      webImages.length ? h('div', { class: 'web-pick' },
-        h('small', { class: 'muted', text: '🔎 صور من Google: ضغط على اللي كيشبهو للمنتوج نيشان باش يتزادو للتصاور' }),
-        webStrip) : null,
       facts.length ? h('div', { class: 'facts' }, ...facts.map((f) => h('span', { text: f }))) : null,
       h('label', { class: 'field' }, h('span', { text: 'سمية المنتوج' }), title),
       (item.names || []).length > 1 ? h('div', {}, h('small', { class: 'muted', text: 'اقتراحات من Google:' }), nameChips) : null,

@@ -17,19 +17,14 @@ from __future__ import annotations
 import base64
 import binascii
 import hmac
-import ipaddress
 import json
 import math
 import os
 import re
 import secrets
-import socket
 import statistics
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -42,9 +37,6 @@ ITEM_DAYS = 30
 MAX_PHOTOS = MAX_GALLERY_IMAGES + 1
 MAX_API_BODY = 40 * 1024 * 1024
 MIN_PRICE = 101  # suggested prices are always above 100 DH
-MAX_WEB_IMAGES = 12          # Google pictures shown on a card
-MAX_WEB_DOWNLOAD = 8 * 1024 * 1024
-WEB_URL = re.compile(r"^https://[^\s\"'<>]{8,1000}$")
 
 ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 URL_PATTERN = re.compile(r"(https?://\S+|www\.\S+|t\.me/\S+|@[A-Za-z0-9_]{4,})", re.I)
@@ -186,63 +178,6 @@ def suggest_categories(categories: list[dict[str, Any]], text: str) -> list[str]
     return found
 
 
-# ------------------------------------------------- pictures found by Google
-def _public_host(url: str) -> bool:
-    """Only https and public internet addresses (never the server itself or a
-    private network), so a picture link can't be used to reach inside."""
-    try:
-        parts = urllib.parse.urlsplit(url)
-        if parts.scheme != "https" or not parts.hostname or parts.port not in (None, 443):
-            return False
-        infos = socket.getaddrinfo(parts.hostname, 443, proto=socket.IPPROTO_TCP)
-    except (ValueError, OSError):
-        return False
-    return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
-
-
-class _SafeRedirects(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-        if not _public_host(newurl):
-            raise urllib.error.HTTPError(newurl, 403, "redirect refused", headers, fp)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-_OPENER = urllib.request.build_opener(_SafeRedirects)
-
-
-def download_picture(url: str) -> bytes | None:
-    if not WEB_URL.fullmatch(url or "") or not _public_host(url):
-        return None
-    request = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5"})
-    try:
-        with _OPENER.open(request, timeout=15) as response:
-            data = response.read(MAX_WEB_DOWNLOAD + 1)
-    except Exception:  # noqa: BLE001 - the site refused, timed out...
-        return None
-    return data if 0 < len(data) <= MAX_WEB_DOWNLOAD else None
-
-
-def clean_web_images(raw: Any) -> list[dict[str, str]]:
-    out = []
-    for entry in raw if isinstance(raw, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        thumb = str(entry.get("thumb") or "")
-        image = str(entry.get("image") or "")
-        thumb = thumb if WEB_URL.fullmatch(thumb) else ""
-        image = image if WEB_URL.fullmatch(image) else ""
-        if not (thumb or image):
-            continue
-        out.append({"thumb": thumb or image, "image": image,
-                    "source": re.sub(r"[<>\"]", "", str(entry.get("source") or ""))[:40],
-                    "title": re.sub(r"[<>\"]", "", str(entry.get("title") or ""))[:80]})
-        if len(out) >= MAX_WEB_IMAGES:
-            break
-    return out
-
-
 # ------------------------------------------------------------------- the inbox
 class ProductInbox:
     def __init__(self, cms: Any, data_dir: Path, public_url: str = "") -> None:
@@ -346,7 +281,6 @@ class ProductInbox:
             "source": re.sub(r"[^\w@.-]", "", str(payload.get("source") or "monitor"))[:60],
             "link": link,
             "images": images,
-            "web_images": clean_web_images(analysis.get("images")),
             "names": names,
             "title": names[0],
             "description": description,
@@ -399,41 +333,8 @@ class ProductInbox:
             if not isinstance(chosen, list) or not chosen:
                 chosen = item["images"]
             chosen = [url for url in dict.fromkeys(str(u) for u in chosen) if url in item["images"]][:MAX_PHOTOS]
-            if payload.get("images") == []:
-                chosen = []
-            web = item.get("web_images") or []
-            picks = []
-            for index in payload.get("web") if isinstance(payload.get("web"), list) else []:
-                if isinstance(index, int) and 0 <= index < len(web) and index not in picks:
-                    picks.append(index)
-            if not chosen and not picks:
-                raise CmsError(400, "ختار على الأقل تصويرة وحدة.")
-        # Google pictures: saved on our server (their links stop working after a while)
-        downloaded, failed = [], 0
-        for index in picks[: max(0, MAX_PHOTOS - len(chosen))]:
-            picture = web[index]
-            saved = ""
-            for url in (picture.get("image"), picture.get("thumb")):
-                data = download_picture(url or "")
-                if not data:
-                    continue
-                try:
-                    saved = self.content.save_upload(data)
-                    break
-                except CmsError:
-                    continue
-            if saved:
-                downloaded.append(saved)
-            else:
-                failed += 1
-        with self._lock:
-            items = self._load()
-            if item_id not in items:
-                self._remove_images(downloaded)
-                raise CmsError(404, "هاد المنتوج ما بقاش فالوارد.")
-            chosen = (chosen + downloaded)[:MAX_PHOTOS]
             if not chosen:
-                raise CmsError(502, "ما قدرتش نجيب التصاور اللي ختاريتي من Google. ختار تصاور أخرى.")
+                raise CmsError(400, "ختار على الأقل تصويرة وحدة.")
             known = {c["id"] for c in self.content.categories() if c.get("id")}
             wanted = payload.get("categories") if isinstance(payload.get("categories"), list) else []
             product_id = "IN" + secrets.token_hex(3).upper()
@@ -464,15 +365,12 @@ class ProductInbox:
                     if error.status == 409:
                         time.sleep(0.3)
                         continue
-                    self._remove_images(downloaded)  # nothing was added: don't keep them
                     raise
                 slug = next((str(p.get("pro-id123")) for ps in saved.values() for p in ps if p.get("id") == product_id), "")
                 break
             else:
-                self._remove_images(downloaded)
                 raise CmsError(409, "المنتجات كتبدلات فنفس الوقت. عاود ضغط.")
             items.pop(item_id, None)
             self._save(items)
         self._remove_images([url for url in item["images"] if url not in chosen])
-        return {"slug": slug, "url": f"{self.public_url}/p/{slug}" if self.public_url and slug else "",
-                "web_added": len(downloaded), "web_failed": failed}
+        return {"slug": slug, "url": f"{self.public_url}/p/{slug}" if self.public_url and slug else ""}

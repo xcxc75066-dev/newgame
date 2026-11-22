@@ -454,7 +454,3 @@ input[type=date] { color-scheme: inherit; }
 .link-box summary .icon { width: 18px; height: 18px; color: var(--primary); }
 .link-line { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
 .link-line code { display: block; padding: 10px; border-radius: 10px; background: var(--inset); font-size: 12px; word-break: break-all; user-select: all; }
-.web-pick { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 14px; background: var(--inset); }
-.pick-photo.web { width: 92px; height: 92px; }
-.pick-photo.web.off img { opacity: .55; filter: none; }
-.pick-photo.web .main-tag { font-weight: 600; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -97,6 +97,9 @@ def _clean_title(title: str) -> str:
     title = re.split(r"\s[|–—]\s|\s-\s|\s:\s|:\s", title)[0]
     title = re.sub(r"[\(\[\{].*?[\)\]\}]", " ", title)
     title = re.sub(r"\d+[.,]?\d*\s*(?:dh|mad|€|\$|usd|eur|درهم)", " ", title, flags=re.I)
+    # supplier / wholesale noise: "at 200/piece", "per piece", "30 pcs", "wholesale"
+    title = re.sub(r"\b(?:at|for|@)\s*\d+[\d.,]*\s*(?:/\s*\w+)?.*$", " ", title, flags=re.I)
+    title = re.sub(r"\d+\s*(?:/\s*)?(?:piece|pieces|pcs|pc|units?)\b|\bper\s+(?:piece|unit)\b|\bwholesale\b|\bbulk\b", " ", title, flags=re.I)
     title = TITLE_NOISE.sub(" ", title)
     title = re.sub(r"[^\w\s\u0600-\u06FF&'.,+/-]", " ", title)
     title = " ".join(title.split()).strip(" -,./+&")

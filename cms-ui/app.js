@@ -1253,6 +1253,32 @@
         button.disabled = false;
       }
     };
+    // ✨ 3 descriptions written by the AI, in the style of the shop's other products
+    const description = h('textarea', { rows: '4', dir: 'auto', maxlength: '2000', oninput: (e) => { form.description = e.target.value; } }, form.description);
+    const aiBox = h('div', { class: 'ai-options', hidden: true });
+    const aiButton = h('button', { type: 'button', class: 'btn secondary block', onclick: async () => {
+      if (!form.title.trim()) return toast('كتب سمية المنتوج أولا', 'error');
+      aiButton.disabled = true;
+      aiBox.hidden = false;
+      aiBox.replaceChildren(h('div', { class: 'spinner small' }), h('p', { class: 'hint', text: 'كنكتبو 3 أوصاف…' }));
+      try {
+        const data = await api('/ai/describe', { method: 'POST', body: {
+          title: form.title, info: item.description || '', names: item.names || [], categories: form.categories
+        } });
+        aiBox.replaceChildren(h('small', { class: 'muted', text: 'ختار واحد (تقدر تبدل فيه من بعد):' }),
+          ...data.options.map((option) => h('button', { type: 'button', class: 'ai-option', onclick: () => {
+            form.description = option.text;
+            description.value = option.text;
+            aiBox.querySelectorAll('.ai-option').forEach((b) => b.classList.remove('chosen'));
+            aiBox.querySelector(`[data-label="${CSS.escape(option.label)}"]`)?.classList.add('chosen');
+          }, 'data-label': option.label }, h('b', { text: option.label }), h('span', { text: option.text }))));
+      } catch (error) {
+        aiBox.replaceChildren(h('p', { class: 'hint', text: error.message }));
+      } finally {
+        aiButton.disabled = false;
+      }
+    } }, icon('spark'), 'اقترح 3 أوصاف (AI)');
+
     const addBtn = h('button', { type: 'button', class: 'btn primary block', onclick: (e) => decide(false, e.currentTarget) }, icon('check'), 'زيد للمتجر');
     const hideBtn = h('button', { type: 'button', class: 'btn ghost block', onclick: (e) => decide(true, e.currentTarget) }, icon('eyeOff'), 'زيد مخفي');
     const dropBtn = h('button', { type: 'button', class: 'btn danger block', onclick: async () => {
@@ -1274,8 +1300,8 @@
         h('label', { class: 'field' }, h('span', { text: 'الثمن (DH)' }), price),
         h('label', { class: 'field' }, h('span', { text: 'قبل التخفيض' }), oldPrice)),
       hint,
-      h('label', { class: 'field' }, h('span', { text: 'الوصف' }),
-        h('textarea', { rows: '3', dir: 'auto', maxlength: '2000', oninput: (e) => { form.description = e.target.value; } }, form.description)),
+      h('label', { class: 'field' }, h('span', { text: 'الوصف' }), description),
+      aiButton, aiBox,
       h('div', {}, h('small', { class: 'muted', text: 'التصنيف:' }), cats),
       h('div', { class: 'inbox-actions' }, addBtn, hideBtn, dropBtn),
       h('div', { class: 'inbox-meta' },

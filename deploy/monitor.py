@@ -497,7 +497,8 @@ def search_serpapi(photo_url):
                     "price": pr.get("extracted_value"),
                     "cur": _norm_currency(pr.get("currency"), pr.get("value")),
                     "rating": m.get("rating"), "reviews": m.get("reviews"),
-                    "exact": bool(m.get("exact_matches"))})
+                    "exact": bool(m.get("exact_matches")),
+                    "thumb": m.get("thumbnail") or "", "image": m.get("image") or ""})
     return out[:60]
 
 
@@ -845,7 +846,12 @@ def analyze(results, text="", seen=None):
             "nch": nch, "reposted": reposted, "opp": opp,
             "verdict": verdict, "confidence": confidence, "advice": adv,
             "top": [(h["dom"], h["title"], h["link"]) for h in top_ma + top_gl],
-            "titles": [r.get("title") or "" for r in sorted(results, key=lambda r: r.get("pos") or 99)[:20]]}
+            "titles": [r.get("title") or "" for r in sorted(results, key=lambda r: r.get("pos") or 99)[:20]],
+            # pictures of the same product on other sites (the CMS lets you pick the good ones)
+            "images": [{"thumb": r.get("thumb") or "", "image": r.get("image") or "", "source": r.get("source") or "",
+                        "title": (r.get("title") or "")[:80]}
+                       for r in sorted(results, key=lambda r: (not r.get("exact"), r.get("pos") or 99))
+                       if r.get("thumb") or r.get("image")][:12]}
 
 
 def _lvl(x):
@@ -949,7 +955,7 @@ def shop_analysis(rep):
     return {"titles": rep.get("titles") or [], "ma_prices": rep.get("ma_prices") or [],
             "world_prices": rep.get("world_prices") or [], "presence": rep.get("presence"),
             "demand": rep.get("demand"), "opp": rep.get("opp"), "verdict": rep.get("verdict"),
-            "brand": rep.get("brand") or ""}
+            "brand": rep.get("brand") or "", "images": rep.get("images") or []}
 
 
 def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link="", rep=None):

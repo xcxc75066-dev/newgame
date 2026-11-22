@@ -64,6 +64,11 @@ CHECK_MOROCCO = True
 SEARCH_ENGINE = "serpapi"
 SERPAPI_KEY = ""
 VISION_KEY = ""
+# التحقق بالتصاور: Gemini كيقارن التصويرة ديال المورد مع كل نتيجة مغربية (✅ نفس الموديل / 🟡 مشابه / ❌ مختالف)
+# والوجود فالمغرب كيتحسب غير بـ ✅. خاوي = بلا تحقق (بحال قبل)
+GEMINI_KEY = ""
+# خاوي = أحدث موديل "flash" اللي كيقبل المفتاح
+GEMINI_MODEL = ""
 # False = كيعلمك بكلشي حتى المنتشر فالمغرب 100% (مع التقرير). True = كيدوز اللي فايت EXPOSED_THRESHOLD
 SKIP_EXPOSED = False
 # من شحال % ديال الوجود فالمغرب كنعتبروه مفضوح
@@ -497,7 +502,7 @@ def search_serpapi(photo_url):
                     "price": pr.get("extracted_value"),
                     "cur": _norm_currency(pr.get("currency"), pr.get("value")),
                     "rating": m.get("rating"), "reviews": m.get("reviews"),
-                    "exact": bool(m.get("exact_matches"))})
+                    "exact": bool(m.get("exact_matches")), "thumb": m.get("thumbnail") or ""})
     return out[:60]
 
 
@@ -707,10 +712,17 @@ def analyze(results, text="", seen=None):
         cat, dom = classify(r)
         cats.setdefault(cat, []).append(dict(r, dom=dom, w=_weight(r)))
 
-    # 1) presence in Morocco
+    # 1) presence in Morocco (when Gemini checked the pictures, only "same model" counts)
     presence, breakdown = 0.0, []
+    similar, different = [], []
     for cat, (first, nxt, cap) in PRESENCE_POINTS.items():
         hits = sorted(cats.get(cat, []), key=lambda x: -x["w"])
+        for h in hits:
+            if h.get("match") == "similar" and h["dom"] not in similar:
+                similar.append(h["dom"])
+            elif h.get("match") == "different" and h["dom"] not in different:
+                different.append(h["dom"])
+        hits = [h for h in hits if h.get("match") in (None, "same")]
         if not hits:
             continue
         pts = sum((first if i == 0 else nxt) * h["w"] for i, h in enumerate(hits[:cap]))
@@ -721,6 +733,7 @@ def analyze(results, text="", seen=None):
                 doms.append(h["dom"])
         breakdown.append((cat, len(hits), round(pts), doms[:3]))
     presence = min(100, round(presence))
+    checked = any(r.get("match") for r in results)
 
     # 2) global demand
     glob = cats.get("global", [])
@@ -839,6 +852,7 @@ def analyze(results, text="", seen=None):
     top_gl = sorted(cats.get("global", []), key=lambda x: -x["w"])[:2]
 
     return {"ok": True, "n": n, "presence": presence, "breakdown": breakdown, "demand": demand,
+            "checked": checked, "similar": similar, "different": different,
             "gdoms": gdoms, "reviews": reviews, "rating": rating, "sp": sp,
             "ma_prices": ma_prices, "world_prices": world_prices, "wholesale": wholesale, "margin": margin,
             "margin_ref": margin_ref, "qty": qty, "capital": capital, "profit": profit, "brand": brand,
@@ -880,11 +894,17 @@ def build_report(rep, title):
          f"🎯 {rep['verdict']}" + ("" if rep["opp"] is None else f" — {rep['opp']}/100"),
          f"🧭 الثقة فالتحليل: {rep['confidence']} ({rep['n']} نتيجة)", "━━━━━━━━━━━━",
          f"🇲🇦 الوجود فالمغرب: {rep['presence']}%"]
+    if rep.get("checked"):
+        L.append("  (تحقق بالتصاور: كيتحسب غير ✅ نفس الموديل)")
     if rep["breakdown"]:
         for cat, cnt, pts, doms in rep["breakdown"]:
-            L.append(f"  {CAT_LABEL[cat]}: {cnt} (+{pts}) — {', '.join(doms)}")
+            L.append(f"  {'✅ ' if rep.get('checked') else ''}{CAT_LABEL[cat]}: {cnt} (+{pts}) — {', '.join(doms)}")
     else:
-        L.append("  ما بان فحتى موقع مغربي")
+        L.append("  ما بان فحتى موقع مغربي" + (" بنفس الموديل" if rep.get("checked") else ""))
+    if rep.get("similar"):
+        L.append("  🟡 مشابه، ماشي نفس الموديل (ما تحسبش): " + ", ".join(rep["similar"][:6]))
+    if rep.get("different"):
+        L.append("  ❌ مختالف (ما تحسبش): " + ", ".join(rep["different"][:6]))
     L.append(f"\n🌍 الطلب العالمي: {_lvl(rep['demand'])} ({rep['demand']}/100)")
     if rep["gdoms"]:
         L.append("  كاين فـ: " + ", ".join(rep["gdoms"][:6]))
@@ -920,13 +940,118 @@ def build_report(rep, title):
     return "\n".join(L)
 
 
+GEMINI_PROMPT = """You compare product photos for a shop. Image 0 is the supplier's product.
+Images 1..N were found online. For each of them say if it shows:
+- "same": the same product model (same shape, buttons, parts, design; color or photo angle may differ)
+- "similar": the same kind of product but another model
+- "different": another product
+Look at details (shape, buttons, number of parts, design), not only at the type of product.
+Answer only with JSON: {"r": [{"i": 1, "v": "same"}, ...]} for every image 1..N."""
+_GEMINI_MODEL_FOUND = ""
+
+
+def _mime(data):
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    return ""
+
+
+def _gemini(body):
+    global _GEMINI_MODEL_FOUND
+    base = "https://generativelanguage.googleapis.com/v1beta"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY, "User-Agent": UA}
+
+    def call(model):
+        req = urllib.request.Request(f"{base}/models/{model}:generateContent", data=json.dumps(body).encode(),
+                                     headers=headers)
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return json.loads(r.read().decode())
+
+    model = GEMINI_MODEL or _GEMINI_MODEL_FOUND or "gemini-2.5-flash"
+    try:
+        return call(model)
+    except urllib.error.HTTPError as e:
+        if e.code != 404 or GEMINI_MODEL:
+            raise
+    # the default model was renamed: take the newest "flash" model of this key
+    req = urllib.request.Request(f"{base}/models?pageSize=200", headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        models = json.loads(r.read().decode()).get("models", [])
+    names = [m["name"].split("/", 1)[-1] for m in models
+             if "generateContent" in (m.get("supportedGenerationMethods") or []) and "flash" in m.get("name", "")
+             and not re.search(r"image|tts|audio|live|embed|lite|exp|preview", m.get("name", ""))]
+    if not names:
+        raise RuntimeError("no Gemini flash model")
+    _GEMINI_MODEL_FOUND = max(names, key=lambda n: (float((re.findall(r"\d+(?:\.\d+)?", n) or ["0"])[0]), -len(n)))
+    return call(_GEMINI_MODEL_FOUND)
+
+
+def verify_morocco(results, photo_url, photo_bytes):
+    """Gemini looks at the supplier photo and at every Moroccan result's picture and
+    marks each one "same" / "similar" / "different". Changes `results` in place."""
+    if not GEMINI_KEY:
+        return False
+    todo = [r for r in results if r.get("thumb") and "match" not in r and classify(r)[0] in MA_CATS][:12]
+    if not todo:
+        return False
+    try:
+        mine = photo_bytes or http_get_bytes(photo_url)
+    except Exception as e:
+        log(f"verify: own photo failed: {e}")
+        return False
+    if not _mime(mine):
+        return False
+    pictures = []
+    for r in todo:
+        try:
+            data = http_get_bytes(r["thumb"], timeout=30)
+        except Exception:
+            continue
+        if _mime(data) and len(data) < 4_000_000:
+            pictures.append((r, data))
+    if not pictures:
+        return False
+    parts = [{"text": GEMINI_PROMPT}, {"text": "Image 0 (supplier):"},
+             {"inline_data": {"mime_type": _mime(mine), "data": base64.b64encode(mine).decode()}}]
+    for i, (_, data) in enumerate(pictures, 1):
+        parts += [{"text": f"Image {i}:"},
+                  {"inline_data": {"mime_type": _mime(data), "data": base64.b64encode(data).decode()}}]
+    body = {"contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}
+    try:
+        data = _gemini(body)
+        text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+        answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+    except Exception as e:
+        log(f"verify: Gemini failed: {e}")
+        return False
+    verdicts = {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
+    for i, (r, _) in enumerate(pictures, 1):
+        if verdicts.get(i) in ("same", "similar", "different"):
+            r["match"] = verdicts[i]
+    log(f"verify: {sum(1 for r, _ in pictures if r.get('match') == 'same')} same / {len(pictures)} Moroccan results")
+    return True
+
+
 def analyze_photo(state, channel, photo_url, photo_bytes, text):
     key = hashlib.sha1(photo_bytes).hexdigest() if photo_bytes else (photo_url or "")
     seen = track_seen(key, channel)
     results, note = get_results(state, key, photo_url, photo_bytes)
     if results is None:
         return {"ok": False, "reason": note}
+    if verify_morocco(results, photo_url, photo_bytes):
+        hit = cache()["img"].get(key)
+        if hit:
+            hit["results"] = results  # keep the verdicts: no second Gemini call for the same photo
+            save_cache()
     rep = analyze(results, text, seen)
+
     rep["note"] = note
     return rep
 

@@ -714,7 +714,8 @@ def analyze(results, text="", seen=None):
 
     # 1) presence in Morocco (when Gemini checked the pictures, only "same model" counts)
     presence, breakdown = 0.0, []
-    similar, different = {}, {}  # site -> how many results
+    similar, different, unchecked = {}, {}, {}  # site -> how many results
+    checked = any(r.get("match") for r in results)
 
     def site_counts(items):
         counts = {}
@@ -728,7 +729,10 @@ def analyze(results, text="", seen=None):
             similar[site] = similar.get(site, 0) + n
         for site, n in site_counts([h for h in hits if h.get("match") == "different"]).items():
             different[site] = different.get(site, 0) + n
-        hits = [h for h in hits if h.get("match") in (None, "same")]
+        for site, n in site_counts([h for h in hits if h.get("match") == "unchecked"]).items():
+            unchecked[site] = unchecked.get(site, 0) + n
+        # checked by Gemini: only the same model counts. Not checked at all: as before
+        hits = [h for h in hits if h.get("match") == "same" or (not checked and h.get("match") is None)]
         if not hits:
             continue
         pts = sum((first if i == 0 else nxt) * h["w"] for i, h in enumerate(hits[:cap]))
@@ -737,7 +741,6 @@ def analyze(results, text="", seen=None):
         doms = [f"{d} ×{n}" if n > 1 else d for d, n in sorted(counts.items(), key=lambda x: -x[1])]
         breakdown.append((cat, len(hits), round(pts), doms[:4]))
     presence = min(100, round(presence))
-    checked = any(r.get("match") for r in results)
 
     # 2) global demand
     glob = cats.get("global", [])
@@ -765,8 +768,8 @@ def analyze(results, text="", seen=None):
             except (TypeError, ValueError):
                 continue
             if cat in MA_CATS and h["cur"] == "MAD":
-                if h.get("match") in ("similar", "different"):
-                    continue  # another model: its price says nothing about ours
+                if h.get("match") in ("similar", "different", "unchecked"):
+                    continue  # another model (or not checked): its price says nothing about ours
                 ma_prices.append(mad)
             elif cat == "sourcing":
                 wholesale.append(mad)
@@ -854,7 +857,7 @@ def analyze(results, text="", seen=None):
         adv.append(f"⭐ تقييمات مزيانة برا ({rating}/5، {reviews} تقييم): منتوج مجرب")
 
     # top links: Moroccan first, then global
-    order = {"same": 0, None: 1, "similar": 2}
+    order = {"same": 0, None: 1, "similar": 2, "unchecked": 3}
     top_ma = sorted((h for c in MA_CATS for h in cats.get(c, []) if h.get("match") != "different"),
                     key=lambda x: (order.get(x.get("match"), 3), -x["w"]))[:4]
     top_gl = sorted(cats.get("global", []), key=lambda x: -x["w"])[:2]
@@ -863,13 +866,14 @@ def analyze(results, text="", seen=None):
             "checked": checked,
             "similar": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(similar.items(), key=lambda x: -x[1])],
             "different": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(different.items(), key=lambda x: -x[1])],
+            "unchecked": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(unchecked.items(), key=lambda x: -x[1])],
             "gdoms": gdoms, "reviews": reviews, "rating": rating, "sp": sp,
             "ma_prices": ma_prices, "world_prices": world_prices, "wholesale": wholesale, "margin": margin,
             "margin_ref": margin_ref, "qty": qty, "capital": capital, "profit": profit, "brand": brand,
             "nch": nch, "reposted": reposted, "opp": opp,
             "verdict": verdict, "confidence": confidence, "advice": adv,
             "top": [(h["dom"], h["title"], h["link"],
-                     {"same": "✅ ", "similar": "🟡 "}.get(h.get("match"), ""), h.get("pos"))
+                     {"same": "✅ ", "similar": "🟡 ", "unchecked": "❔ "}.get(h.get("match"), ""), h.get("pos"))
                     for h in top_ma + top_gl],
             "titles": [r.get("title") or "" for r in sorted(results, key=lambda r: r.get("pos") or 99)[:20]]}
 
@@ -917,6 +921,8 @@ def build_report(rep, title):
         L.append("  🟡 مشابه، ماشي نفس الموديل (ما تحسبش): " + ", ".join(rep["similar"][:6]))
     if rep.get("different"):
         L.append("  ❌ مختالف (ما تحسبش): " + ", ".join(rep["different"][:6]))
+    if rep.get("unchecked"):
+        L.append("  ❔ ما تحققاتش (ما تحسبش): " + ", ".join(rep["unchecked"][:6]))
     L.append(f"\n🌍 الطلب العالمي: {_lvl(rep['demand'])} ({rep['demand']}/100)")
     if rep["gdoms"]:
         L.append("  كاين فـ: " + ", ".join(rep["gdoms"][:6]))
@@ -1005,13 +1011,78 @@ def _gemini(body):
     return call(_GEMINI_MODEL_FOUND)
 
 
+COLLAGE_PROMPT = """You compare product photos for a shop.
+The FIRST image is the supplier's product.
+The SECOND image is a collage of pictures found online; each cell has a number in its top-left corner.
+For each numbered cell say if it shows:
+- "same": the same product model (same shape, buttons, parts, design; color or photo angle may differ)
+- "similar": the same kind of product but another model
+- "different": another product
+Look at details (shape, buttons, number of parts, design), not only at the type of product.
+Answer only with JSON: {"r": [{"i": 1, "v": "same"}, ...]} for every numbered cell."""
+VERIFY_MAX = 24        # Moroccan results checked per product
+COLLAGE_COLS = 5
+COLLAGE_CELL = 256
+
+
+def make_collage(pictures):
+    """All the pictures in one numbered grid (one image for Gemini instead of many:
+    far fewer tokens). Needs Pillow (apt-get install -y python3-pil); None without it."""
+    try:
+        import io
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    cols = min(COLLAGE_COLS, len(pictures))
+    rows = (len(pictures) + cols - 1) // cols
+    cell = COLLAGE_CELL
+    sheet = Image.new("RGB", (cols * cell, rows * cell), "white")
+    draw = ImageDraw.Draw(sheet)
+    try:
+        font = ImageFont.load_default(size=34)
+    except TypeError:  # older Pillow
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 34)
+        except OSError:
+            font = ImageFont.load_default()
+    for n, data in enumerate(pictures):
+        try:
+            picture = Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception:
+            continue
+        picture.thumbnail((cell - 8, cell - 8))
+        x, y = (n % cols) * cell, (n // cols) * cell
+        sheet.paste(picture, (x + (cell - picture.width) // 2, y + (cell - picture.height) // 2))
+        draw.rectangle([x, y, x + cell - 1, y + cell - 1], outline=(180, 180, 180), width=2)
+        draw.rectangle([x + 2, y + 2, x + 58, y + 48], fill=(200, 0, 0))
+        draw.text((x + 10, y + 6), str(n + 1), fill="white", font=font)
+    out = io.BytesIO()
+    sheet.save(out, "JPEG", quality=82)
+    return out.getvalue()
+
+
+def _ask_gemini(parts):
+    body = {"contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}
+    data = _gemini(body)
+    text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+    answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+    return {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
+
+
+def _inline(data):
+    return {"inline_data": {"mime_type": _mime(data), "data": base64.b64encode(data).decode()}}
+
+
 def verify_morocco(results, photo_url, photo_bytes):
-    """Gemini looks at the supplier photo and at every Moroccan result's picture and
-    marks each one "same" / "similar" / "different". Changes `results` in place."""
+    """Gemini compares the supplier photo with the picture of every Moroccan result
+    and marks each one "same" / "similar" / "different" (in place).
+    All the Moroccan pictures go in ONE numbered collage (few tokens). Results that
+    could not be checked are marked "unchecked" and never count as the same model."""
     if not GEMINI_KEY:
         return False
-    todo = [r for r in results if r.get("thumb") and "match" not in r and classify(r)[0] in MA_CATS][:12]
-    if not todo:
+    moroccan = [r for r in results if "match" not in r and classify(r)[0] in MA_CATS]
+    if not moroccan:
         return False
     try:
         mine = photo_bytes or http_get_bytes(photo_url)
@@ -1021,7 +1092,9 @@ def verify_morocco(results, photo_url, photo_bytes):
     if not _mime(mine):
         return False
     pictures = []
-    for r in todo:
+    for r in moroccan[:VERIFY_MAX]:
+        if not r.get("thumb"):
+            continue
         try:
             data = http_get_bytes(r["thumb"], timeout=30)
         except Exception:
@@ -1029,26 +1102,33 @@ def verify_morocco(results, photo_url, photo_bytes):
         if _mime(data) and len(data) < 4_000_000:
             pictures.append((r, data))
     if not pictures:
-        return False
-    parts = [{"text": GEMINI_PROMPT}, {"text": "Image 0 (supplier):"},
-             {"inline_data": {"mime_type": _mime(mine), "data": base64.b64encode(mine).decode()}}]
-    for i, (_, data) in enumerate(pictures, 1):
-        parts += [{"text": f"Image {i}:"},
-                  {"inline_data": {"mime_type": _mime(data), "data": base64.b64encode(data).decode()}}]
-    body = {"contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}
-    try:
-        data = _gemini(body)
-        text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
-        answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
-    except Exception as e:
-        log(f"verify: Gemini failed: {e}")
-        return False
-    verdicts = {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
+        return False  # nothing could be looked at: keep the old way of counting
+    verdicts = {}
+    if pictures:
+        collage = make_collage([data for _, data in pictures])
+        try:
+            if collage:
+                verdicts = _ask_gemini([{"text": COLLAGE_PROMPT}, {"text": "Supplier product:"}, _inline(mine),
+                                        {"text": f"Collage of {len(pictures)} numbered pictures:"}, _inline(collage)])
+            else:  # no Pillow: one image each, 12 at a time
+                for start in range(0, len(pictures), 12):
+                    chunk = pictures[start:start + 12]
+                    parts = [{"text": GEMINI_PROMPT}, {"text": "Image 0 (supplier):"}, _inline(mine)]
+                    for i, (_, data) in enumerate(chunk, 1):
+                        parts += [{"text": f"Image {i}:"}, _inline(data)]
+                    for i, v in _ask_gemini(parts).items():
+                        verdicts[start + i] = v
+        except Exception as e:
+            log(f"verify: Gemini failed: {e}")
+            return False
     for i, (r, _) in enumerate(pictures, 1):
         if verdicts.get(i) in ("same", "similar", "different"):
             r["match"] = verdicts[i]
-    log(f"verify: {sum(1 for r, _ in pictures if r.get('match') == 'same')} same / {len(pictures)} Moroccan results")
+    for r in moroccan:
+        r.setdefault("match", "unchecked")  # no picture, too far down, or no answer
+    same = sum(1 for r in moroccan if r["match"] == "same")
+    log(f"verify: {same} same / {len(pictures)} checked / {len(moroccan)} Moroccan results"
+        f"{' (collage)' if pictures and make_collage and collage else ''}")
     return True
 
 

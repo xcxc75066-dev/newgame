@@ -625,6 +625,8 @@
     $('f-title').value = draft.title || '';
     $('f-brand').value = draft.brand || '';
     $('f-description').value = draft.description || '';
+    $('aiOptions').hidden = true;
+    $('aiOptions').replaceChildren();
     $('f-price').value = draft.price === '' ? '' : String(draft.price);
     $('f-oldPrice').value = Number(draft.oldPrice) ? String(draft.oldPrice) : '';
     $('f-image').value = draft.image || '';
@@ -679,6 +681,33 @@
   bind('f-title', 'title');
   bind('f-brand', 'brand');
   bind('f-description', 'description');
+
+  // ✨ AI descriptions in the product editor too
+  $('aiDescribeBtn').addEventListener('click', async () => {
+    const draft = state.editing.draft;
+    const box = $('aiOptions');
+    if (!draft.title.trim()) { toast('كتب سمية المنتوج أولا', 'error'); $('f-title').focus(); return; }
+    $('aiDescribeBtn').disabled = true;
+    box.hidden = false;
+    box.replaceChildren(h('div', { class: 'spinner small' }), h('p', { class: 'hint', text: 'كنكتبو 3 أوصاف…' }));
+    try {
+      const data = await api('/ai/describe', { method: 'POST', body: {
+        title: draft.title, info: draft.description || '', names: [], categories: draft.categories || []
+      } });
+      box.replaceChildren(h('small', { class: 'muted', text: 'ختار واحد (تقدر تبدل فيه من بعد):' }),
+        ...data.options.map((option) => h('button', { type: 'button', class: 'ai-option', onclick: (e) => {
+          draft.description = option.text;
+          $('f-description').value = option.text;
+          markDirty();
+          box.querySelectorAll('.ai-option').forEach((b) => b.classList.remove('chosen'));
+          e.currentTarget.classList.add('chosen');
+        } }, h('b', { text: option.label }), h('span', { text: option.text }))));
+    } catch (error) {
+      box.replaceChildren(h('p', { class: 'hint', text: error.message }));
+    } finally {
+      $('aiDescribeBtn').disabled = false;
+    }
+  });
   bind('f-price', 'price', (v) => v.replace(',', '.'));
   bind('f-oldPrice', 'oldPrice', (v) => v.replace(',', '.'));
   $('f-price').addEventListener('input', renderDiscount);

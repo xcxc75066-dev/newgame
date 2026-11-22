@@ -1719,13 +1719,16 @@
             text-decoration: line-through;
         }
 
+        /* Product description: bigger, darker and easy to read (Arabic or French) */
         .qm-description {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            text-align: center;
-            margin-bottom: 25px;
-            line-height: 1.5;
-            direction: ltr;
+            font-size: 1rem;
+            color: var(--text-dark);
+            text-align: start;
+            margin: 0 auto 25px;
+            max-width: 560px;
+            line-height: 1.9;
+            white-space: pre-line;
+            unicode-bidi: plaintext;
         }
 
         .qm-section-title {
@@ -2248,7 +2251,7 @@
                 <span class="qm-old-price notranslate" id="qmOldPrice">149 DH</span>
             </div>
 
-            <p class="qm-description">
+            <p class="qm-description" dir="auto">
                 Give your car a fresh, pleasant atmosphere with the Solar Windmill Car Air Freshener. Designed with a stylish windmill-inspired shape, it uses solar energy to power its rotating blades, creating an attractive visual effect while helping spread a refreshing fragrance throughout your car.
             </p>
 
@@ -4356,7 +4359,7 @@
             });
 
             document.getElementById('qmTitle').innerText = title;
-            document.querySelector('.qm-description').innerHTML = desc;
+            document.querySelector('.qm-description').textContent = desc.trim(); // text only, never HTML
             renderQmMedia(prod, img);
             document.getElementById('qmQtyVal').innerText = currentQty;
             renderQmVariants();

@@ -55,6 +55,7 @@ from analytics import Analytics, shop_now  # noqa: E402
 from cms_backend import CmsError, CmsService  # noqa: E402
 import product_inbox  # noqa: E402
 from product_inbox import ProductInbox  # noqa: E402
+from ai_writer import AiWriter  # noqa: E402
 
 CMS_PATH = "/mycmseditor"
 CMS_UI_DIR = APP_DIR / "cms-ui"
@@ -1196,6 +1197,9 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 inbox.delete(str(self._read_json().get("id") or ""))
                 self._send_cms(HTTPStatus.OK, {"ok": True})
                 return
+            if path == "/api/cms/ai/describe" and method == "POST":
+                self._send_cms(HTTPStatus.OK, {"ok": True, "options": self.server.ai.describe(self._read_json())})
+                return
             if path == "/api/cms/inbox/link" and method == "POST":
                 reset = bool(self._read_json().get("reset"))
                 self._send_cms(HTTPStatus.OK, {"ok": True, "line": inbox.link_line(reset)})
@@ -1548,6 +1552,7 @@ class AmaniHTTPServer(ThreadingHTTPServer):
         # Supplier products sent by monitor.py wait in the CMS inbox ("📥 الوارد").
         public_url = next((o for o in config.allowed_origins if o.startswith("https://")), "")
         self.inbox = ProductInbox(self.cms, config.db_path.parent, public_url)
+        self.ai = AiWriter(self.cms.content)  # "✨ اقترح وصف" (Gemini, key in .env)
         super().__init__((config.host, config.port), AmaniRequestHandler)
 
 

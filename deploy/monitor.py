@@ -135,15 +135,17 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 STARTED_AT = time.time()
 
 # buttons of the bot keyboard
-BTN_ADD, BTN_LIST = "➕ زيد قناة", "📋 القنوات"
-BTN_KW, BTN_STATUS = "🔑 الكلمات", "📊 الحالة"
-BTN_PAUSE, BTN_RESUME = "⏸ وقف", "▶️ شغل"
-BTN_MODE = "🔄 غير التصاور / مع النص"
-BTN_TEST = "🔔 جرب الإشعارات"
-BTN_SHOP = "🛒 ربط المتجر"
-KEYBOARD = json.dumps({"keyboard": [[BTN_ADD, BTN_LIST], [BTN_KW, BTN_STATUS],
-                                    [BTN_PAUSE, BTN_RESUME], [BTN_MODE], [BTN_TEST, BTN_SHOP]],
-                       "resize_keyboard": True, "is_persistent": True})
+# Small keyboard: 2 rows, hidden by default (open it with the ⌨️ button next to the text box).
+BTN_LIST, BTN_ADD, BTN_KW, BTN_STATUS = "📋 القنوات", "➕ قناة", "🔑 كلمات", "📊 الحالة"
+BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST = "⏯ وقف/شغل", "🔄 الوضع", "🛒 المتجر", "🔔 تجربة"
+BTN_PAUSE, BTN_RESUME = "⏸ وقف", "▶️ شغل"  # old buttons, still understood
+KEYBOARD = json.dumps({"keyboard": [[BTN_LIST, BTN_ADD, BTN_KW, BTN_STATUS],
+                                    [BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST]],
+                       "resize_keyboard": True, "one_time_keyboard": True, "is_persistent": False,
+                       "input_field_placeholder": "⌨️ = الأزرار"})
+# the texts of the old, bigger keyboard (people may still press them)
+OLD_BUTTONS = {"➕ زيد قناة": BTN_ADD, "🔑 الكلمات": BTN_KW, "🔄 غير التصاور / مع النص": BTN_MODE,
+               "🔔 جرب الإشعارات": BTN_TEST, "🛒 ربط المتجر": BTN_SHOP, "/menu": "/menu"}
 
 
 def log(msg):
@@ -1229,7 +1231,7 @@ def send_to_shop(state, cid, key, quiet=False):
         say("❌ هاد المنتوج قديم بزاف. صيفط ليا البوست من جديد (Forward ولا الرابط).")
         return False
     if not (SHOP_URL and SHOP_TOKEN):
-        say(f"🛒 خاصك تربط المتجر أولا: ضغط «{BTN_SHOP}».", KEYBOARD)
+        say(f"🛒 خاصك تربط المتجر أولا: ضغط «{BTN_SHOP}».")
         return False
     photos = []
     for path in item.get("files", []):
@@ -1261,7 +1263,7 @@ def send_to_shop(state, cid, key, quiet=False):
         return True
     if status == 401:
         log("shop: link code refused (link again)")
-        say(f"❌ الربط مع المتجر ما بقاش صالح. خود السطر الجديد من الـ CMS (📥 الوارد) وعاود «{BTN_SHOP}».", KEYBOARD)
+        say(f"❌ الربط مع المتجر ما بقاش صالح. خود السطر الجديد من الـ CMS (📥 الوارد) وعاود «{BTN_SHOP}».")
     elif status == 0:
         say("❌ ما قدرتش نوصل للمتجر. تأكد بلي الموقع خدام وعاود.")
     else:
@@ -1276,7 +1278,7 @@ def link_shop(cid, text):
     url, _, token = line.partition("|")
     url, token = url.strip().rstrip("/"), token.strip()
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?", url) or len(token) < 32:
-        send(cid, "❌ هادا ماشي السطر الصحيح. فالـ CMS سير لـ «📥 الوارد ← ربط البوت ديال الموردين» ونسخ السطر كامل.", KEYBOARD)
+        send(cid, "❌ هادا ماشي السطر الصحيح. فالـ CMS سير لـ «📥 الوارد ← ربط البوت ديال الموردين» ونسخ السطر كامل.")
         return
     old = (SHOP_URL, SHOP_TOKEN)
     globals().update(SHOP_URL=url, SHOP_TOKEN=token)
@@ -1284,13 +1286,13 @@ def link_shop(cid, text):
     if status == 400:
         save_settings({"SHOP_URL": url, "SHOP_TOKEN": token})
         send(cid, f"✅ تربط المتجر ({url}).\n" + ("دابا كل منتوج جديد غادي يمشي بوحدو لـ «📥 الوارد» فالـ CMS."
-                   if AUTO_SHOP else "دابا تحت كل منتوج كاين زر «🛒 زيدو للمتجر»."), KEYBOARD)
+                   if AUTO_SHOP else "دابا تحت كل منتوج كاين زر «🛒 زيدو للمتجر»."))
         return
     globals().update(SHOP_URL=old[0], SHOP_TOKEN=old[1])
     if status == 401:
-        send(cid, "❌ الكود غالط ولا تبدل. خود السطر من جديد من الـ CMS (📥 الوارد).", KEYBOARD)
+        send(cid, "❌ الكود غالط ولا تبدل. خود السطر من جديد من الـ CMS (📥 الوارد).")
     else:
-        send(cid, f"❌ ما قدرتش نوصل للمتجر ({status or 'بلا جواب'}). تأكد من الموقع وعاود.", KEYBOARD)
+        send(cid, f"❌ ما قدرتش نوصل للمتجر ({status or 'بلا جواب'}). تأكد من الموقع وعاود.")
 
 
 # ----------------------------------------------------------------- one new post
@@ -1566,11 +1568,12 @@ def status_text(state):
             f"{' · كل منتوج كيمشي للوارد بوحدو' if (AUTO_SHOP and SHOP_URL) else ''}")
 
 
-HELP = ("استعمل الأزرار اللي لتحت 👇\n"
-        f"{BTN_ADD}: صيفط الرابط ديال القناة\n"
+HELP = ("⌨️ الأزرار كيتحلو بالزر ⌨️ حدا خانة الكتبة (ولا صيفط /menu):\n"
         f"{BTN_LIST}: تشوف القنوات وتحيد اللي بغيتي\n"
+        f"{BTN_ADD}: صيفط الرابط ديال القناة\n"
         f"{BTN_KW}: تبدل كلمات الفلتر\n"
-        f"{BTN_PAUSE} / {BTN_RESUME}: توقف ولا ترجع التتبع\n"
+        f"{BTN_STATUS}: الحالة ديال البوت\n"
+        f"{BTN_TOGGLE}: توقف ولا ترجع التتبع\n"
         f"{BTN_MODE}: غير البوستات اللي فيهم تصاور، ولا حتى النص\n"
         f"{BTN_TEST}: تتأكد بلي الإشعارات كيوصلو\n"
         f"{BTN_SHOP}: تربط هاد البوت مع المتجر ديالك (مرة وحدة)\n\n"
@@ -1709,8 +1712,11 @@ def handle_message(state, msg):
     fwd_chat = origin.get("chat") or msg.get("forward_from_chat") or {}
     fwd_id = origin.get("message_id") or msg.get("forward_from_message_id")
     post_link = parse_post_link(text)
+    text = OLD_BUTTONS.get(text, text)
 
-    if text == BTN_ADD:
+    if text in ("/menu", "/start"):
+        send(cid, "⌨️ ها هي الأزرار. كيتخباو بوحدهم من بعد ما تختار؛ ترجعهم بالزر ⌨️ حدا خانة الكتبة.", KEYBOARD)
+    elif text == BTN_ADD:
         waiting[str(cid)] = "add"
         send(cid, "صيفط ليا الرابط ديال القناة (ولا بزاف، كل واحد فسطر)\n"
                   "ولا دير Forward لشي بوست من القناة.\nمثال: https://t.me/shopname")
@@ -1723,23 +1729,26 @@ def handle_message(state, msg):
         send(cid, f"🔑 الكلمات دابا: {cur}\n\nصيفط الكلمات الجداد مفرقين بفاصلة\n"
                   "مثال: nike, iphone, parfum\nولا صيفط 0 باش تخويهم وتوصلك كل البوستات")
     elif text in (BTN_STATUS, "/status"):
-        send(cid, status_text(state), KEYBOARD)
+        send(cid, status_text(state))
+    elif text == BTN_TOGGLE:
+        state["paused"] = not state.get("paused")
+        save_state(state)
+        send(cid, "⏸ وقفت التتبع. ضغط «⏯ وقف/شغل» باش نرجع." if state["paused"] else "▶️ رجعت نتبع القنوات.")
     elif text == BTN_PAUSE:
         state["paused"] = True
-        send(cid, "⏸ وقفت التتبع. ضغط " + BTN_RESUME + " باش نرجع.", KEYBOARD)
+        send(cid, "⏸ وقفت التتبع. ضغط «⏯ وقف/شغل» باش نرجع.")
     elif text == BTN_RESUME:
         state["paused"] = False
-        send(cid, "▶️ رجعت نتبع القنوات.", KEYBOARD)
+        send(cid, "▶️ رجعت نتبع القنوات.")
     elif text == BTN_MODE:
         save_settings({"PHOTOS_ONLY": not PHOTOS_ONLY})
         note = "\n\n(هادا الوضع العادي. باش تبدل غير قناة وحدة، سير لـ 📋 القنوات)"
         if PHOTOS_ONLY:
             send(cid, "🖼 دابا: غير التصاور\nكنصيفط ليك البوست اللي فيه تصويرة ديريكت، "
-                      "والبوستات اللي فيهم غير النص كندوزهم." + note, KEYBOARD)
+                      "والبوستات اللي فيهم غير النص كندوزهم." + note)
         else:
             send(cid, "📝 دابا: مع النص\nإلا جات التصويرة بوحدها، كنتسنى النص اللي موراها "
-                      f"({TEXT_WAIT // 60} دقايق) ونجمعهم. والبوستات ديال النص بوحدو كيوصلوك حتى هوما." + note,
-                 KEYBOARD)
+                      f"({TEXT_WAIT // 60} دقايق) ونجمعهم. والبوستات ديال النص بوحدو كيوصلوك حتى هوما." + note)
     elif text == BTN_TEST:
         send(cid, "🔔 هادا ميساج تجريبي من البوت. إلا وصلك، تيليجرام خدام.")
         if NTFY_TOPIC:
@@ -1760,23 +1769,23 @@ def handle_message(state, msg):
         uname = fwd_chat.get("username")
         if mode == "add":
             send(cid, add_channels(state, [uname]) if uname else
-                 "❌ هاد القناة خاصة (ما عندهاش رابط عام)، ما كنقدرش نتبعها.", KEYBOARD)
+                 "❌ هاد القناة خاصة (ما عندهاش رابط عام)، ما كنقدرش نتبعها.")
         elif uname and fwd_id:
             offer_post(cid, uname, int(fwd_id))
         elif _photo_from_message(msg):
             report_for(state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
         else:
-            send(cid, "❌ هاد القناة خاصة وما فيهاش تصويرة نحللها.", KEYBOARD)
+            send(cid, "❌ هاد القناة خاصة وما فيهاش تصويرة نحللها.")
     elif mode == "add":
         names, bad = parse_channels(text)
-        send(cid, add_channels(state, names, bad), KEYBOARD)
+        send(cid, add_channels(state, names, bad))
     elif mode == "kw":
         if text in ("0", "مسح", "حيد"):
             new = []
         else:
             new = [k.strip() for k in re.split(r"[,،\n]+", text) if k.strip()]
         save_settings({"KEYWORDS": new})
-        send(cid, "✅ تبدلو الكلمات: " + (", ".join(new) if new else "كل بوست جديد"), KEYBOARD)
+        send(cid, "✅ تبدلو الكلمات: " + (", ".join(new) if new else "كل بوست جديد"))
     elif _photo_from_message(msg):
         report_for(state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
     elif post_link:
@@ -1957,14 +1966,24 @@ def main():
     if not state.get("hello_sent"):
         hello = f"✅ السكريبت خدام. كنتبع {len(CHANNELS)} قناة." + \
             ("" if CHANNELS else f"\nضغط {BTN_ADD} باش تزيد القنوات ديال الموردين.")
-        broadcast(state, hello, KEYBOARD)
+        broadcast(state, hello)
         send_ntfy("✅ خدام", hello, priority=3)
         state["hello_sent"] = True
+        save_state(state)
+    try:
+        bot_api("setMyCommands", {"commands": json.dumps([
+            {"command": "menu", "description": "الأزرار"}, {"command": "status", "description": "الحالة"}])})
+    except Exception as e:
+        log(f"setMyCommands failed: {e}")
+    if not state.get("small_keyboard_sent"):
+        broadcast(state, "⌨️ الأزرار ولاو صغار ومخبيين باش يبان كلشي. كتحلهم بالزر ⌨️ حدا خانة الكتبة "
+                         "(ولا صيفط /menu).", KEYBOARD)
+        state["small_keyboard_sent"] = True
         save_state(state)
     if not state.get("inbox_hello_sent"):
         broadcast(state, "🆕 جديد: كل منتوج جديد كيمشي بوحدو لـ «📥 الوارد» فالـ CMS ديال المتجر، "
                          "على شكل بطاقة (سمية من Google، ثمن مقترح، تصنيف). تما كتقرر واش تزيدو.\n"
-                         + ("" if (SHOP_URL and SHOP_TOKEN) else f"باش يخدم، ضغط «{BTN_SHOP}» مرة وحدة."), KEYBOARD)
+                         + ("" if (SHOP_URL and SHOP_TOKEN) else f"باش يخدم، ضغط «{BTN_SHOP}» مرة وحدة."))
         state["inbox_hello_sent"] = True
         save_state(state)
 

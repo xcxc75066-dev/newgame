@@ -56,6 +56,7 @@ from cms_backend import CmsError, CmsService  # noqa: E402
 import product_inbox  # noqa: E402
 from product_inbox import ProductInbox  # noqa: E402
 from ai_writer import AiWriter  # noqa: E402
+from translator import LANGUAGES as SHOP_LANGUAGES, Translator  # noqa: E402
 
 CMS_PATH = "/mycmseditor"
 CMS_UI_DIR = APP_DIR / "cms-ui"
@@ -1363,6 +1364,13 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/categories":
             self._send_json({"ok": True, "categories": self.server.cms.content.public_categories()})
             return
+        if path.startswith("/api/i18n/"):
+            language = path.rsplit("/", 1)[-1]
+            if language not in SHOP_LANGUAGES:
+                self._send_error(HTTPStatus.NOT_FOUND, "Route not found.")
+                return
+            self._send_json({"ok": True, "language": language, "texts": self.server.translator.table(language)})
+            return
         if path == "/api/banners":
             # null = never set in the CMS: the shop keeps its built-in pictures
             self._send_json({"ok": True, "banners": self.server.cms.content.banners()})
@@ -1570,6 +1578,7 @@ class AmaniHTTPServer(ThreadingHTTPServer):
         public_url = next((o for o in config.allowed_origins if o.startswith("https://")), "")
         self.inbox = ProductInbox(self.cms, config.db_path.parent, public_url)
         self.ai = AiWriter(self.cms.content)  # "✨ اقترح وصف" (Gemini, key in .env)
+        self.translator = Translator(self.cms.content, self.ai)  # shop texts in ar / fr / en
         super().__init__((config.host, config.port), AmaniRequestHandler)
 
 
@@ -1601,6 +1610,7 @@ def main() -> None:
 
     server = AmaniHTTPServer(config)
     server.analytics.start_scheduler()  # Telegram reports every 6 hours + daily at 21:00
+    server.translator.start()  # new shop texts are translated once (Gemini) and kept
     LOGGER.info(
         "Amani Order Server listening on http://%s:%s | database=%s | html=%s",
         config.host,

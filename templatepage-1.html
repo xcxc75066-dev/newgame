@@ -2,6 +2,9 @@
 <html lang="en"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google" content="notranslate">
+    <!-- Languages: Arabic by default, French, English (no Google Translate) -->
+    <script src="/assets/i18n.js"></script>
     <title>Amani Market - Entertainment Products</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <meta name="theme-color" content="#0A3A2A">
@@ -12,6 +15,68 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
 
     <style>
+        /* Languages (assets/i18n.js) */
+        html.i18n-pending body { visibility: hidden; }
+        .lang-picker {
+            position: fixed;
+            inset: 0;
+            z-index: 5000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(10, 30, 22, 0.55);
+            backdrop-filter: blur(3px);
+        }
+        .lang-picker-card {
+            width: min(100%, 460px);
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 26px 18px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        }
+        .lang-picker-title {
+            margin: 0 0 18px;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            color: #1f1f1f;
+            font-weight: 600;
+        }
+        .lang-picker-row {
+            display: flex;
+            gap: 10px;
+            direction: ltr;
+        }
+        .lang-picker-row button {
+            flex: 1;
+            min-height: 54px;
+            border-radius: 14px;
+            border: 1.5px solid #0A3A2A;
+            background: #ffffff;
+            color: #0A3A2A;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .lang-picker-row button:first-child { background: #0A3A2A; color: #ffffff; }
+        /* Arabic (right to left): sliders keep their own direction */
+        html[dir="rtl"] .hp-slider-container,
+        html[dir="rtl"] .hp-slider-track { direction: ltr; }
+        /* prices like "299 DH" stay in their order inside Arabic text */
+        html[dir="rtl"] .notranslate,
+        html[dir="rtl"] .current-price,
+        html[dir="rtl"] .old-price,
+        html[dir="rtl"] .qm-current-price,
+        html[dir="rtl"] .qm-old-price {
+            direction: ltr;
+            unicode-bidi: isolate;
+        }
+        .lang-picker-title span { display: block; }
+        /* the scrolling announcement keeps moving the same way in Arabic */
+        html[dir="rtl"] .announcement-track { direction: ltr; }
+        html[dir="rtl"] .announcement-track > span { direction: rtl; unicode-bidi: isolate; }
+
         :root {
             --primary-green: #0a3a2a;
             --primary-dark: #06261c;
@@ -2479,7 +2544,6 @@
     <!-- Footer is maintained in its own file (footers-html/footer-main.html).
          It is placed straight into the page, so it always shows at full height. -->
     <div class="external-footer-frame" id="siteFooterHost"></div>
-    <div id="google_translate_element" hidden></div>
 
     <!-- Floating WhatsApp -->
     <a href="https://wa.me/212754708678" class="whatsapp-float" target="_blank">
@@ -4055,87 +4119,8 @@
         }
         bindCatalogLinks();
 
-        // --- LANGUAGE (Google Translate) ---
-        // The shop can be read in English, French or Arabic. Google Translate
-        // translates everything on the page, products included (even ones written
-        // in Arabic). First visit: the visitor's phone/browser language is used.
-        const SITE_LANGUAGES = ['en', 'fr', 'ar'];
-        const LANGUAGE_STORAGE_KEY = 'amani-language';
-
-        function storedSiteLanguage() {
-            try { return localStorage.getItem(LANGUAGE_STORAGE_KEY) || ''; } catch (_) { return ''; }
-        }
-
-        function browserSiteLanguage() {
-            const wanted = navigator.languages && navigator.languages.length
-                ? navigator.languages
-                : [navigator.language || 'en'];
-            for (const language of wanted) {
-                const code = String(language).slice(0, 2).toLowerCase();
-                if (SITE_LANGUAGES.includes(code)) return code;
-            }
-            return 'en';
-        }
-
-        function currentSiteLanguage() {
-            const stored = storedSiteLanguage();
-            return SITE_LANGUAGES.includes(stored) ? stored : browserSiteLanguage();
-        }
-
-        function setTranslateCookie(language) {
-            const host = window.location.hostname;
-            const parts = host.split('.');
-            const domains = ['', host, `.${parts.slice(-2).join('.')}`];
-            // Clear every copy Google may have stored, then set the new choice.
-            domains.forEach(domain => {
-                document.cookie = `googtrans=; path=/; max-age=0${domain ? `; domain=${domain}` : ''}`;
-            });
-            document.cookie = `googtrans=/auto/${language}; path=/; max-age=31536000; SameSite=Lax`;
-        }
-
-        function markLanguageButtons(language) {
-            document.querySelectorAll('[data-lang]').forEach(button => {
-                const active = button.dataset.lang === language;
-                button.classList.toggle('is-active', active);
-                button.setAttribute('aria-pressed', String(active));
-            });
-        }
-
-        function chooseSiteLanguage(language) {
-            if (!SITE_LANGUAGES.includes(language)) return;
-            try { localStorage.setItem(LANGUAGE_STORAGE_KEY, language); } catch (_) { /* private mode */ }
-            setTranslateCookie(language);
-            window.location.reload();
-        }
-
-        function bindLanguageButtons(root = document) {
-            root.querySelectorAll('[data-lang]').forEach(button => {
-                if (button.dataset.langBound) return;
-                button.dataset.langBound = '1';
-                button.addEventListener('click', () => chooseSiteLanguage(button.dataset.lang));
-            });
-            markLanguageButtons(currentSiteLanguage());
-        }
-
-        function startSiteTranslation() {
-            const language = currentSiteLanguage();
-            setTranslateCookie(language); // must exist before Google's script starts
-            bindLanguageButtons();
-            window.googleTranslateElementInit = () => {
-                if (!window.google || !google.translate) return;
-                new google.translate.TranslateElement({
-                    includedLanguages: SITE_LANGUAGES.join(','),
-                    autoDisplay: false
-                }, 'google_translate_element');
-            };
-            const script = document.createElement('script');
-            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
-            script.async = true;
-            script.onerror = () => console.warn('Google Translate could not be loaded.');
-            document.body.appendChild(script);
-        }
-
-        startSiteTranslation();
+        // --- LANGUAGE ---
+        // Handled by /assets/i18n.js (Arabic by default, French, English; no Google Translate).
 
         if (trackIds().isNew) trackEvent('visit');
         let checkoutTracked = false;
@@ -4790,7 +4775,6 @@
                 host.replaceChildren(style, document.importNode(footer, true));
                 host.dataset.loaded = '1';
                 bindCatalogLinks(host);
-                bindLanguageButtons(host);
             } catch (error) {
                 console.warn('The footer could not be loaded.', error);
             }

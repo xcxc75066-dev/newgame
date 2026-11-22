@@ -1209,9 +1209,7 @@ def check_channel(state, channel):
                 break
             if time.time() - hold["since"] < wait:
                 break
-        # 3) no photo but a video -> use the video picture
-        if not item["photos"] and item["thumbs"]:
-            item["photos"], item["video"] = item["thumbs"][:1], True
+        # 3) videos are ignored: a post with only a video (no real photo) is skipped
         if (item["photos"] or (not po and item["text"])) and matches(item["text"]):
             handle_post(state, channel, pid, item)
         cs["last_id"] = used[-1]
@@ -1433,8 +1431,8 @@ def handle_callback(state, cq):
             pass
 
 
-def _photo_from_message(msg, video_ok=True):
-    """file_id of a photo sent to the bot (photo, image file, or the picture of a video)."""
+def _photo_from_message(msg, video_ok=False):
+    """file_id of a photo sent to the bot (photo or image file). Videos are ignored."""
     if msg.get("photo"):
         return msg["photo"][-1]["file_id"]
     doc = msg.get("document") or {}

@@ -181,6 +181,38 @@ def suggest_categories(categories: list[dict[str, Any]], text: str) -> list[str]
     return found
 
 
+# Words that point to each built-in product type (English, French, Arabic, Darija).
+TYPE_KEYWORDS = {
+    "home": "home house maison menage ménage cleaning nettoyage storage rangement organizer organisateur lamp lampe "
+            "decor déco curtain rideau منزل دار تنظيف ترتيب ديكور",
+    "kitchen": "kitchen cuisine cook cooker cuiseur egg oeuf œuf blender mixeur knife couteau pan poele poêle pot "
+               "marmite coffee café cafe tea thé مطبخ طبخ كوزينة بيض",
+    "personal-care": "hair cheveux skin peau massage massager shaver rasoir trimmer tondeuse teeth dent dental "
+                     "body corps foot pied شعر بشرة عناية تدليك حلاقة",
+    "beauty": "makeup maquillage nail ongle lipstick rouge beauty beauté cosmetic cosmétique eyelash cils "
+              "تجميل مكياج أظافر",
+    "perfumes": "perfume parfum fragrance oud musk musc eau de toilette عطر مسك عود بخور",
+    "electronics": "phone téléphone telephone charger chargeur bluetooth speaker enceinte earbuds écouteurs headphone "
+                   "casque smartwatch montre connectée led usb camera caméra power bank هاتف شاحن سماعة كاميرا",
+    "car": "car voiture auto automobile vehicle véhicule سيارة طوموبيل",
+    "kids": "kid kids enfant enfants baby bébé bebe toy toys jouet jouets child children أطفال طفل لعبة بيبي",
+    "sport": "sport fitness gym yoga running musculation رياضة",
+    "gifts": "gift cadeau present هدية",
+}
+
+
+def suggest_types(types: list[dict[str, Any]], text: str) -> list[str]:
+    haystack = " " + re.sub(r"[^\w\u0600-\u06FF]+", " ", text.casefold()) + " "
+    found = []
+    for product_type in types:
+        type_id = str(product_type.get("id") or "")
+        words = TYPE_KEYWORDS.get(type_id, "").split()
+        words += [w for w in re.findall(r"[\w\u0600-\u06FF]{3,}", str(product_type.get("title") or "").casefold())]
+        if any(f" {w.casefold()} " in haystack or (len(w) >= 5 and w.casefold() in haystack) for w in words):
+            found.append(type_id)
+    return found[:3]
+
+
 # ------------------------------------------------------------------- the inbox
 class ProductInbox:
     def __init__(self, cms: Any, data_dir: Path, public_url: str = "") -> None:
@@ -268,6 +300,7 @@ class ProductInbox:
         price, old_price = suggest_prices(cost, morocco, world)
         categories = self.content.categories()
         suggested = suggest_categories(categories, " ".join([*names, *titles[:10], text]))
+        suggested_types = suggest_types(self.content.types(), " ".join([*names, *titles[:10], text]))
         link = str(payload.get("link") or "")
         link = link if re.fullmatch(r"https://t\.me/[\w/+-]{1,200}", link) else ""
 
@@ -291,6 +324,7 @@ class ProductInbox:
             "oldPrice": old_price,
             "cost": cost,
             "categories": suggested,
+            "types": suggested_types,
             "market": {
                 "morocco": round(morocco) if morocco else None,
                 "world": round(world) if world else None,
@@ -356,6 +390,7 @@ class ProductInbox:
                 "hidden": bool(payload.get("hidden")),
                 "addedAt": date.today().isoformat(),
                 "categories": [c for c in dict.fromkeys(str(x) for x in wanted) if c in known],
+                "types": [str(t) for t in (payload.get("types") or [])[:5]] if isinstance(payload.get("types"), list) else [],
             }
             slug = ""
             for _ in range(4):

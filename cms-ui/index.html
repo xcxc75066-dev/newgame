@@ -111,12 +111,38 @@
         <header class="page-head"><h1 class="page-title">المزيد</h1></header>
         <div class="menu-list">
           <button type="button" class="menu-item" data-go="inbox"><span data-icon="inbox"></span><b>📥 الوارد</b><small>المنتجات الجداد من القنوات: فحص وزيد</small></button>
+          <button type="button" class="menu-item" data-go="banners"><span data-icon="camera"></span><b>🖼 البانر</b><small>الصور العريضة الفوق: الرئيسية وكل تصنيف</small></button>
+          <button type="button" class="menu-item" data-go="types"><span data-icon="tag"></span><b>🏷 الأنواع</b><small>أنواع المنتوجات (للمنتوجات المشابهة)</small></button>
           <button type="button" class="menu-item" data-go="categories"><span data-icon="folder"></span><b>التصنيفات</b><small>الأقسام اللي فالمنيو ديال المتجر</small></button>
           <button type="button" class="menu-item" data-go="history"><span data-icon="history"></span><b>السجل</b><small>رجوع لنسخة قديمة من المنتجات</small></button>
           <a class="menu-item" id="shopLink" href="/" target="_blank" rel="noopener"><span data-icon="external"></span><b>فتح المتجر</b><small>boutiqueamani-maroc.com</small></a>
           <button type="button" class="menu-item" id="themeToggle"><span data-icon="moon" id="themeIcon"></span><b id="themeLabel">الوضع الفاتح</b><small>بدّل بين الليل والنهار</small></button>
           <button type="button" class="menu-item danger" id="logoutBtn"><span data-icon="logout"></span><b>خروج</b><small>سد الجلسة على هاد الجهاز</small></button>
         </div>
+      </section>
+
+      <!-- Banners: the wide pictures on top of the shop -->
+      <section id="tab-banners" class="panel" hidden>
+        <header class="page-head">
+          <button type="button" class="icon-btn" data-go="more" aria-label="رجوع" data-icon="back"></button>
+          <h1 class="page-title grow">🖼 البانر</h1>
+        </header>
+        <p class="hint">الصور العريضة اللي فوق «Popular products». كل تصنيف تقدر تعطيه الصور ديالو؛ إلا ما عندوش، كيبانو صور الرئيسية. أحسن قياس: صورة عريضة (16:9).</p>
+        <label class="field"><span>الصفحة</span><select id="bannerScope"></select></label>
+        <div id="bannerList" class="banner-list"></div>
+        <button type="button" class="btn secondary block" id="addBannerBtn"><span data-icon="camera"></span>زيد صورة</button>
+        <button type="button" class="btn primary block" id="saveBannersBtn"><span data-icon="check"></span>حفظ البانر</button>
+      </section>
+
+      <!-- Product types -->
+      <section id="tab-types" class="panel" hidden>
+        <header class="page-head">
+          <button type="button" class="icon-btn" data-go="more" aria-label="رجوع" data-icon="back"></button>
+          <h1 class="page-title grow">🏷 الأنواع</h1>
+        </header>
+        <p class="hint">النوع ماشي هو التصنيف ديال المنيو. كيستعمل غير باش «Related» يجيب المنتوجات المشابهة، والنوع اللي كاين بزاف فالصفحة كيجي اللول.</p>
+        <button class="btn primary block" id="addTypeBtn" type="button"><span data-icon="plus"></span>نوع جديد</button>
+        <div id="typeList" class="category-list"></div>
       </section>
 
       <!-- Categories -->
@@ -231,6 +257,12 @@
         <fieldset class="card">
           <legend>التصنيفات</legend>
           <div id="categoryChecks" class="check-list"></div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend>النوع (للمنتوجات المشابهة)</legend>
+          <p class="note">كيستعملو فـ «Related»: المنتوجات اللي عندها نفس النوع كيبانو مع بعضياتهم، والنوع الغالب فالصفحة كيجي اللول.</p>
+          <div id="typeChecks" class="check-list"></div>
         </fieldset>
 
         <fieldset class="card">

@@ -43,6 +43,25 @@ PRODUCT_LISTS = (("popular", "productspage-1.json"), ("more", "productspage-2.js
 MAX_PRODUCTS = 300
 MAX_CATEGORIES = 50
 CATEGORIES_FILE = "categories.json"
+TYPES_FILE = "types.json"
+BANNERS_FILE = "banners.json"
+MAX_TYPES = 40
+MAX_BANNERS = 10
+BANNER_LINK_PATTERN = re.compile(r"^/(?:c|p)/[A-Za-z0-9_-]{1,120}$")
+# Product "types" (not the menu categories): used to show similar products in
+# "Related", the most common type of the page first. Editable in the CMS.
+DEFAULT_TYPES = [
+    {"id": "home", "title": "🏠 لوازم منزلية"},
+    {"id": "kitchen", "title": "🍳 المطبخ"},
+    {"id": "personal-care", "title": "💆 العناية الشخصية"},
+    {"id": "beauty", "title": "💄 التجميل"},
+    {"id": "perfumes", "title": "🌸 العطور"},
+    {"id": "electronics", "title": "📱 الإلكترونيات"},
+    {"id": "car", "title": "🚗 إكسسوارات السيارة"},
+    {"id": "kids", "title": "🧸 الأطفال"},
+    {"id": "sport", "title": "🏋️ الرياضة"},
+    {"id": "gifts", "title": "🎁 هدايا"},
+]
 CATEGORY_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,59}$")
 HISTORY_KEEP = 60
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
@@ -246,7 +265,7 @@ def _image_url(value: Any, label: str, *, required: bool) -> str:
     url = _text(value, label, max_length=2000, required=required)
     if not url:
         return ""
-    if any(ch in url for ch in " \"'`\\"):
+    if any(ch in url for ch in " \"'`\\") or ".." in url:
         raise CmsError(400, f"{label}: الرابط غير صالح.")
     if url.startswith("https://") or re.match(r"^/(?:uploads|images|assets)/[A-Za-z0-9._/-]+$", url):
         return url
@@ -420,7 +439,55 @@ def clean_categories(categories: Any) -> list[dict[str, Any]]:
     return cleaned
 
 
-def clean_catalog(lists: Any, category_ids: set[str] | None = None) -> dict[str, list[dict[str, Any]]]:
+def clean_types(types: Any) -> list[dict[str, Any]]:
+    """[{id, title}] - the product types the owner can pick in the CMS."""
+    if not isinstance(types, list) or len(types) > MAX_TYPES:
+        raise CmsError(400, f"الأنواع غير صالحة (الحد {MAX_TYPES}).")
+    cleaned, used, titles = [], set(), set()
+    for index, raw in enumerate(types, start=1):
+        if not isinstance(raw, dict):
+            raise CmsError(400, f"النوع رقم {index}: بيانات غير صالحة.")
+        title = _text(raw.get("title"), f"النوع رقم {index} - الاسم", max_length=40)
+        if title.casefold() in titles:
+            raise CmsError(400, f"النوع «{title}» مكرر.")
+        titles.add(title.casefold())
+        type_id = str(raw.get("id") or "").strip()
+        if not CATEGORY_ID_PATTERN.fullmatch(type_id) or type_id in used:
+            base = slugify(title)
+            type_id = base if base != "product" and CATEGORY_ID_PATTERN.fullmatch(base) else f"type-{secrets.token_hex(3)}"
+            while type_id in used:
+                type_id = f"{base[:50]}-{secrets.token_hex(2)}"
+        used.add(type_id)
+        cleaned.append({"id": type_id, "title": title})
+    return cleaned
+
+
+def clean_banners(banners: Any, category_ids: set[str]) -> dict[str, list[dict[str, str]]]:
+    """{"home": [{image, link}], "<category id>": [...]} - the wide pictures on top."""
+    if not isinstance(banners, dict):
+        raise CmsError(400, "البانر غير صالح.")
+    cleaned: dict[str, list[dict[str, str]]] = {}
+    for scope, slides in banners.items():
+        scope = str(scope)
+        if scope != "home" and scope not in category_ids:
+            continue  # a deleted category
+        if not isinstance(slides, list) or len(slides) > MAX_BANNERS:
+            raise CmsError(400, f"الحد الأقصى {MAX_BANNERS} صور فالبانر.")
+        clean_slides = []
+        for n, slide in enumerate(slides, start=1):
+            if not isinstance(slide, dict):
+                raise CmsError(400, f"صورة البانر رقم {n}: غير صالحة.")
+            link = str(slide.get("link") or "").strip()
+            if link and not BANNER_LINK_PATTERN.fullmatch(link):
+                raise CmsError(400, f"صورة البانر رقم {n}: الرابط غير صالح.")
+            clean_slides.append({"image": _image_url(slide.get("image"), f"صورة البانر رقم {n}", required=True), "link": link})
+        cleaned[scope] = clean_slides
+    return cleaned
+
+
+def clean_catalog(
+    lists: Any, category_ids: set[str] | None = None, type_ids: set[str] | None = None
+) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(lists, dict):
         raise CmsError(400, "بيانات المنتجات غير صالحة.")
     used_ids: set[str] = set()
@@ -438,6 +505,13 @@ def clean_catalog(lists: Any, category_ids: set[str] | None = None) -> dict[str,
             clean_product(item, index, used_ids, used_slugs)
             for index, item in enumerate(items, start=1)
         ]
+        if type_ids is not None:
+            for product, raw in zip(cleaned[key], items):
+                wanted = raw.get("types") if isinstance(raw, dict) else None
+                product["types"] = [
+                    t for t in dict.fromkeys(str(x) for x in (wanted if isinstance(wanted, list) else []))
+                    if t in type_ids
+                ][:5]
         if category_ids is not None:
             for product, raw in zip(cleaned[key], items):
                 wanted = raw.get("categories") if isinstance(raw, dict) else None
@@ -475,6 +549,8 @@ class ContentStore:
         for directory in (self.products_dir, self.history_dir, self.uploads_dir):
             directory.mkdir(parents=True, exist_ok=True)
         self.categories_path = data_dir / "content" / CATEGORIES_FILE
+        self.types_path = data_dir / "content" / TYPES_FILE
+        self.banners_path = data_dir / "content" / BANNERS_FILE
         if not any(self.products_dir.glob("*.json")) and seed_products_dir.is_dir():
             # First start: begin with the products that were in the repository.
             for source in sorted(seed_products_dir.glob("*.json")):
@@ -526,6 +602,38 @@ class ContentStore:
         items = data.get("categories") if isinstance(data, dict) else data
         return [c for c in items if isinstance(c, dict)] if isinstance(items, list) else []
 
+    def types(self) -> list[dict[str, Any]]:
+        try:
+            data = json.loads(self.types_path.read_text(encoding="utf-8"))
+            items = data.get("types") if isinstance(data, dict) else data
+            if isinstance(items, list):
+                return [t for t in items if isinstance(t, dict)]
+        except (OSError, ValueError):
+            pass
+        return [dict(t) for t in DEFAULT_TYPES]
+
+    def save_types(self, types: Any) -> list[dict[str, Any]]:
+        with self._lock:
+            cleaned = clean_types(types)
+            body = json.dumps({"types": cleaned}, ensure_ascii=False, indent=2) + "\n"
+            _atomic_write(self.types_path, body.encode("utf-8"))
+            return cleaned
+
+    def banners(self) -> dict[str, Any] | None:
+        """None = never set (the shop keeps its built-in pictures)."""
+        try:
+            data = json.loads(self.banners_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return data.get("banners") if isinstance(data, dict) and isinstance(data.get("banners"), dict) else None
+
+    def save_banners(self, banners: Any) -> dict[str, Any]:
+        with self._lock:
+            cleaned = clean_banners(banners, {c["id"] for c in self.categories() if c.get("id")})
+            body = json.dumps({"banners": cleaned}, ensure_ascii=False, indent=2) + "\n"
+            _atomic_write(self.banners_path, body.encode("utf-8"))
+            return cleaned
+
     def public_categories(self) -> list[dict[str, Any]]:
         return [{"id": c.get("id"), "title": c.get("title")} for c in self.categories() if not c.get("hidden")]
 
@@ -569,7 +677,7 @@ class ContentStore:
     ) -> tuple[dict[str, list[dict[str, Any]]], str]:
         with self._lock:
             new_categories = clean_categories(categories) if categories is not None else self.categories()
-            cleaned = clean_catalog(lists, {c["id"] for c in new_categories})
+            cleaned = clean_catalog(lists, {c["id"] for c in new_categories}, {t["id"] for t in self.types()})
             current, version = self.read()
             if not hmac.compare_digest(str(expected_version or ""), version):
                 raise CmsError(409, "تم تعديل المنتجات من مكان آخر. حدّث الصفحة ثم أعد المحاولة.")
@@ -607,7 +715,7 @@ class ContentStore:
         with self._lock:
             # Old copies made before categories existed keep today's categories.
             categories = clean_categories(snapshot["categories"]) if isinstance(snapshot.get("categories"), list) else self.categories()
-            cleaned = clean_catalog(lists, {c["id"] for c in categories})
+            cleaned = clean_catalog(lists, {c["id"] for c in categories}, {t["id"] for t in self.types()})
             current, version = self.read()
             if not hmac.compare_digest(str(expected_version or ""), version):
                 raise CmsError(409, "تم تعديل المنتجات من مكان آخر. حدّث الصفحة ثم أعد المحاولة.")

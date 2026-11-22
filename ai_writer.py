@@ -150,6 +150,21 @@ class AiWriter:
                 raise self._friendly(error) from None
         return self._options(data)
 
+    def generate_json(self, body: dict[str, Any]) -> Any:
+        """One Gemini call that answers JSON (used by the translator)."""
+        model = os.getenv("AMANI_AI_MODEL", "").strip() or self._model or DEFAULT_MODEL
+        try:
+            data = self._generate(model, body)
+        except _HttpError as error:
+            if error.status != 404 or os.getenv("AMANI_AI_MODEL", "").strip():
+                raise
+            self._model = self._find_model()
+            data = self._generate(self._model, body)
+        text = "".join(str(part.get("text") or "") for candidate in (data.get("candidates") or [])[:1]
+                       for part in (candidate.get("content") or {}).get("parts") or [])
+        match = re.search(r"[\[{].*[\]}]", text, re.S)
+        return json.loads(match.group(0) if match else text)
+
     def _generate(self, model: str, body: dict[str, Any]) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9._-]{3,80}", model):
             raise _HttpError(404, "bad model name")

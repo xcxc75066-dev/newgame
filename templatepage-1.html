@@ -2,6 +2,9 @@
 <html lang="en"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google" content="notranslate">
+    <!-- Languages: Arabic by default, French, English (no Google Translate) -->
+    <script src="/assets/i18n.js"></script>
     <title>Amani Market - Entertainment Products</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <meta name="theme-color" content="#0A3A2A">
@@ -12,6 +15,68 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
 
     <style>
+        /* Languages (assets/i18n.js) */
+        html.i18n-pending body { visibility: hidden; }
+        .lang-picker {
+            position: fixed;
+            inset: 0;
+            z-index: 5000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(10, 30, 22, 0.55);
+            backdrop-filter: blur(3px);
+        }
+        .lang-picker-card {
+            width: min(100%, 460px);
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 26px 18px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        }
+        .lang-picker-title {
+            margin: 0 0 18px;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            color: #1f1f1f;
+            font-weight: 600;
+        }
+        .lang-picker-row {
+            display: flex;
+            gap: 10px;
+            direction: ltr;
+        }
+        .lang-picker-row button {
+            flex: 1;
+            min-height: 54px;
+            border-radius: 14px;
+            border: 1.5px solid #0A3A2A;
+            background: #ffffff;
+            color: #0A3A2A;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .lang-picker-row button:first-child { background: #0A3A2A; color: #ffffff; }
+        /* Arabic (right to left): sliders keep their own direction */
+        html[dir="rtl"] .hp-slider-container,
+        html[dir="rtl"] .hp-slider-track { direction: ltr; }
+        /* prices like "299 DH" stay in their order inside Arabic text */
+        html[dir="rtl"] .notranslate,
+        html[dir="rtl"] .current-price,
+        html[dir="rtl"] .old-price,
+        html[dir="rtl"] .qm-current-price,
+        html[dir="rtl"] .qm-old-price {
+            direction: ltr;
+            unicode-bidi: isolate;
+        }
+        .lang-picker-title span { display: block; }
+        /* the scrolling announcement keeps moving the same way in Arabic */
+        html[dir="rtl"] .announcement-track { direction: ltr; }
+        html[dir="rtl"] .announcement-track > span { direction: rtl; unicode-bidi: isolate; }
+
         :root {
             --primary-green: #0a3a2a;
             --primary-dark: #06261c;
@@ -2479,7 +2544,6 @@
     <!-- Footer is maintained in its own file (footers-html/footer-main.html).
          It is placed straight into the page, so it always shows at full height. -->
     <div class="external-footer-frame" id="siteFooterHost"></div>
-    <div id="google_translate_element" hidden></div>
 
     <!-- Floating WhatsApp -->
     <a href="https://wa.me/212754708678" class="whatsapp-float" target="_blank">
@@ -2648,7 +2712,58 @@
             }
         }
 
-        new UltraSmoothSlider(document.getElementById('headphonesSlider'));
+        // Banner pictures come from the CMS (/api/banners). A category uses its
+        // own pictures, else the home ones. Never set in the CMS: the built-in
+        // pictures stay. Set but empty: no banner.
+        let bannerSlider = null;
+        async function initBannerSlider() {
+            const container = document.getElementById('headphonesSlider');
+            const wrapper = document.querySelector('.headphones-slider-wrapper');
+            if (!container) return;
+            let slides = null;
+            try {
+                const response = await fetch('/api/banners', { cache: 'no-store' });
+                const data = response.ok ? await response.json() : {};
+                if (data && data.banners) {
+                    const match = window.location.pathname.match(/^\/c\/([^/]+)\/?$/i);
+                    let categoryId = '';
+                    if (match) { try { categoryId = decodeURIComponent(match[1]); } catch (_) { categoryId = match[1]; } }
+                    const own = categoryId && Array.isArray(data.banners[categoryId]) ? data.banners[categoryId] : [];
+                    slides = own.length ? own : (Array.isArray(data.banners.home) ? data.banners.home : []);
+                }
+            } catch (_) { slides = null; }
+            if (slides) {
+                const track = container.querySelector('.hp-slider-track');
+                track.replaceChildren(...slides.map((slide, index) => {
+                    const holder = document.createElement('div');
+                    holder.className = 'hp-slide';
+                    const image = document.createElement('img');
+                    image.src = slide.image;
+                    image.alt = `Banner ${index + 1}`;
+                    image.loading = index ? 'lazy' : 'eager';
+                    if (slide.link) {
+                        const link = document.createElement('a');
+                        link.href = slide.link;
+                        link.addEventListener('click', (event) => {
+                            if (bannerSlider && bannerSlider.hasDragged) event.preventDefault();
+                        });
+                        link.appendChild(image);
+                        holder.appendChild(link);
+                    } else {
+                        holder.appendChild(image);
+                    }
+                    return holder;
+                }));
+                if (!slides.length && wrapper) {
+                    wrapper.dataset.empty = '1';
+                    wrapper.hidden = true;
+                }
+                const arrows = container.querySelectorAll('.hp-nav-arrow');
+                arrows.forEach(arrow => { arrow.hidden = slides.length < 2; });
+            }
+            bannerSlider = new UltraSmoothSlider(container);
+        }
+        initBannerSlider();
 
         // --- 2. DYNAMIC CATEGORIES ---
         // Keep a clean local copy so the sidebar remains usable when the
@@ -3412,6 +3527,7 @@
                 order: Number(product.order || 999999),
                 addedAt: String(product.addedAt || ''),
                 categories: Array.isArray(product.categories) ? product.categories.map(String) : [],
+                types: Array.isArray(product.types) ? product.types.map(String) : [],
                 sourceFile
             };
             return normalized;
@@ -3658,7 +3774,9 @@
                 ? jsonCatalog.new
                 : sectionName === 'offers'
                     ? sortOfferProducts(jsonCatalog.offers)
-                    : sortJsonProducts(jsonCatalog[sectionName]);
+                    : sectionName === 'related'
+                        ? jsonCatalog.related // already in the "dominant type first" order
+                        : sortJsonProducts(jsonCatalog[sectionName]);
             const start = fullPage ? page * JSON_PRODUCT_PAGE_SIZE : 0;
             const count = fullPage ? JSON_PRODUCT_PAGE_SIZE : 9;
             const visibleProducts = products.slice(start, start + count);
@@ -3700,25 +3818,48 @@
             if (!popularHeader || !productsGrid || !relatedSection || !offersSection) return;
 
             const isPopular = validPage === 'popular';
-            popularHeader.hidden = !isHome && !isPopular;
-            productsGrid.hidden = !isHome && !isPopular;
-            relatedSection.hidden = !isHome && validPage !== 'related';
-            // On the home page, hide Best Offers while no product qualifies.
-            offersSection.hidden = isHome ? !jsonCatalog.offers.length : validPage !== 'offers';
+            const isCategory = validPage === 'category';
+            const homeLike = isHome || isCategory; // a category page looks like the home page
+            applyCatalogScope(isCategory ? currentCategoryId : '');
+            popularHeader.hidden = !homeLike && !isPopular;
+            productsGrid.hidden = !homeLike && !isPopular;
+            relatedSection.hidden = !homeLike && validPage !== 'related';
+            // Hide Best Offers while no product qualifies.
+            offersSection.hidden = homeLike ? !jsonCatalog.offers.length : validPage !== 'offers';
             if (newsSection) newsSection.hidden = validPage !== 'new';
             const categorySection = document.getElementById('categorySection');
-            if (categorySection) categorySection.hidden = validPage !== 'category';
-            if (slider) slider.hidden = !isHome;
+            if (categorySection) categorySection.hidden = true;
+            if (slider) slider.hidden = !homeLike || slider.dataset.empty === '1';
             if (back) back.hidden = isHome;
             if (whatsNew) whatsNew.hidden = !isHome;
-            document.body.classList.toggle('catalog-page-full', !isHome && validPage !== 'new' && validPage !== 'category');
+            document.body.classList.toggle('catalog-page-full', !homeLike && validPage !== 'new');
+            const popularTitle = popularHeader.querySelector('.section-title');
+            const category = isCategory ? shopCategories.find(c => c.id === currentCategoryId) : null;
+            if (popularTitle) popularTitle.textContent = isCategory ? (category ? category.title : 'Category') : 'OUR POPULAR PRODUCTS';
+            ['popularViewMoreWrap', 'relatedViewMoreWrap', 'offersViewMoreWrap'].forEach(id => {
+                const wrap = document.getElementById(id);
+                if (wrap && isCategory) wrap.hidden = true;
+            });
 
             if (isHome) {
                 renderJsonSection('popular', 0, false);
                 renderJsonSection('related', 0, false);
                 renderJsonSection('offers', 0, false);
-            } else if (validPage === 'category') {
-                renderCategoryPage();
+            } else if (isCategory) {
+                // every product of the category, then related and offers
+                productsGrid.replaceChildren(...jsonCatalog.popular.map(productCardFromJson));
+                if (!jsonCatalog.popular.length) {
+                    const empty = document.createElement('p');
+                    empty.className = 'catalog-empty-message';
+                    empty.textContent = 'Products coming soon. Come back soon!';
+                    productsGrid.replaceChildren(empty);
+                }
+                renderJsonSection('related', 0, false);
+                renderJsonSection('offers', 0, false);
+                ['popularViewMoreWrap', 'relatedViewMoreWrap', 'offersViewMoreWrap'].forEach(id => {
+                    const wrap = document.getElementById(id);
+                    if (wrap) wrap.hidden = true;
+                });
             } else {
                 renderJsonSection(validPage, jsonCatalog.pages[validPage], true);
             }
@@ -3731,6 +3872,46 @@
                     window.history.pushState({}, '', nextUrl);
                 }
             }
+        }
+
+        // Related products: the types of the products on the page are counted;
+        // products of the most common type come first, then the next one...
+        // (products already shown above are skipped). Then the usual related
+        // products fill the rest so the section is never empty.
+        function relatedByTypes(basis, pool, fallback) {
+            const counts = new Map();
+            basis.forEach(product => (product.types || []).forEach(type => {
+                counts.set(type, (counts.get(type) || 0) + 1);
+            }));
+            const key = product => product.proId || product.id;
+            const used = new Set(basis.map(key));
+            const out = [];
+            const ranked = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a));
+            ranked.forEach(type => {
+                sortJsonProducts(pool.filter(product => !used.has(key(product)) && (product.types || []).includes(type)))
+                    .forEach(product => { used.add(key(product)); out.push(product); });
+            });
+            fallback.forEach(product => {
+                if (!used.has(key(product))) { used.add(key(product)); out.push(product); }
+            });
+            return out;
+        }
+
+        // The home page and the category pages share the same layout; only the
+        // products change. jsonCatalog.home keeps the home lists.
+        function applyCatalogScope(categoryId) {
+            const home = jsonCatalog.home;
+            if (!home) return;
+            if (!categoryId) {
+                jsonCatalog.popular = home.popular;
+                jsonCatalog.related = home.related;
+                jsonCatalog.offers = home.offers;
+                return;
+            }
+            const inCategory = jsonCatalog.all.filter(product => product.categories.includes(categoryId));
+            jsonCatalog.popular = sortJsonProducts(inCategory);
+            jsonCatalog.related = relatedByTypes(inCategory, jsonCatalog.all, home.related);
+            jsonCatalog.offers = home.offers.filter(product => product.categories.includes(categoryId));
         }
 
         function renderCategoryPage() {
@@ -3785,6 +3966,8 @@
             jsonCatalog.offers = sortOfferProducts(
                 allProducts.filter(product => productSaving(product) > BEST_OFFER_MIN_SAVING)
             );
+            jsonCatalog.related = relatedByTypes(jsonCatalog.popular, jsonCatalog.all, jsonCatalog.related);
+            jsonCatalog.home = { popular: jsonCatalog.popular, related: jsonCatalog.related, offers: jsonCatalog.offers };
             jsonCatalog.new = allProducts
                 .filter(product => isNewProduct(product))
                 .sort((first, second) => productAddedTime(second) - productAddedTime(first)
@@ -3936,87 +4119,8 @@
         }
         bindCatalogLinks();
 
-        // --- LANGUAGE (Google Translate) ---
-        // The shop can be read in English, French or Arabic. Google Translate
-        // translates everything on the page, products included (even ones written
-        // in Arabic). First visit: the visitor's phone/browser language is used.
-        const SITE_LANGUAGES = ['en', 'fr', 'ar'];
-        const LANGUAGE_STORAGE_KEY = 'amani-language';
-
-        function storedSiteLanguage() {
-            try { return localStorage.getItem(LANGUAGE_STORAGE_KEY) || ''; } catch (_) { return ''; }
-        }
-
-        function browserSiteLanguage() {
-            const wanted = navigator.languages && navigator.languages.length
-                ? navigator.languages
-                : [navigator.language || 'en'];
-            for (const language of wanted) {
-                const code = String(language).slice(0, 2).toLowerCase();
-                if (SITE_LANGUAGES.includes(code)) return code;
-            }
-            return 'en';
-        }
-
-        function currentSiteLanguage() {
-            const stored = storedSiteLanguage();
-            return SITE_LANGUAGES.includes(stored) ? stored : browserSiteLanguage();
-        }
-
-        function setTranslateCookie(language) {
-            const host = window.location.hostname;
-            const parts = host.split('.');
-            const domains = ['', host, `.${parts.slice(-2).join('.')}`];
-            // Clear every copy Google may have stored, then set the new choice.
-            domains.forEach(domain => {
-                document.cookie = `googtrans=; path=/; max-age=0${domain ? `; domain=${domain}` : ''}`;
-            });
-            document.cookie = `googtrans=/auto/${language}; path=/; max-age=31536000; SameSite=Lax`;
-        }
-
-        function markLanguageButtons(language) {
-            document.querySelectorAll('[data-lang]').forEach(button => {
-                const active = button.dataset.lang === language;
-                button.classList.toggle('is-active', active);
-                button.setAttribute('aria-pressed', String(active));
-            });
-        }
-
-        function chooseSiteLanguage(language) {
-            if (!SITE_LANGUAGES.includes(language)) return;
-            try { localStorage.setItem(LANGUAGE_STORAGE_KEY, language); } catch (_) { /* private mode */ }
-            setTranslateCookie(language);
-            window.location.reload();
-        }
-
-        function bindLanguageButtons(root = document) {
-            root.querySelectorAll('[data-lang]').forEach(button => {
-                if (button.dataset.langBound) return;
-                button.dataset.langBound = '1';
-                button.addEventListener('click', () => chooseSiteLanguage(button.dataset.lang));
-            });
-            markLanguageButtons(currentSiteLanguage());
-        }
-
-        function startSiteTranslation() {
-            const language = currentSiteLanguage();
-            setTranslateCookie(language); // must exist before Google's script starts
-            bindLanguageButtons();
-            window.googleTranslateElementInit = () => {
-                if (!window.google || !google.translate) return;
-                new google.translate.TranslateElement({
-                    includedLanguages: SITE_LANGUAGES.join(','),
-                    autoDisplay: false
-                }, 'google_translate_element');
-            };
-            const script = document.createElement('script');
-            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
-            script.async = true;
-            script.onerror = () => console.warn('Google Translate could not be loaded.');
-            document.body.appendChild(script);
-        }
-
-        startSiteTranslation();
+        // --- LANGUAGE ---
+        // Handled by /assets/i18n.js (Arabic by default, French, English; no Google Translate).
 
         if (trackIds().isNew) trackEvent('visit');
         let checkoutTracked = false;
@@ -4671,7 +4775,6 @@
                 host.replaceChildren(style, document.importNode(footer, true));
                 host.dataset.loaded = '1';
                 bindCatalogLinks(host);
-                bindLanguageButtons(host);
             } catch (error) {
                 console.warn('The footer could not be loaded.', error);
             }

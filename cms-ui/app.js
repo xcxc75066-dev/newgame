@@ -291,10 +291,10 @@
   $('shopLink').querySelector('small').textContent = shopBase().replace(/^https?:\/\//, '');
 
   // ---------------------------------------------------------------- navigation
-  const VIEWS = ['home', 'orders', 'products', 'stats', 'more', 'categories', 'history', 'inbox'];
+  const VIEWS = ['home', 'orders', 'products', 'stats', 'more', 'categories', 'history', 'inbox', 'banners', 'types'];
   function switchTab(name) {
     state.tab = name;
-    const navName = name === 'categories' || name === 'history' ? 'more' : name === 'inbox' ? 'products' : name;
+    const navName = ['categories', 'history', 'banners', 'types'].includes(name) ? 'more' : name === 'inbox' ? 'products' : name;
     document.querySelectorAll('#navTabs button[data-tab]').forEach((button) => {
       const active = button.dataset.tab === navName;
       button.classList.toggle('active', active);
@@ -309,6 +309,8 @@
     if (name === 'stats') loadStats();
     if (name === 'history') loadHistory();
     if (name === 'inbox') loadInbox();
+    if (name === 'banners') loadBanners();
+    if (name === 'types') renderTypesTab();
   }
   document.querySelectorAll('#navTabs button[data-tab]').forEach((button) => {
     button.addEventListener('click', () => switchTab(button.dataset.tab));
@@ -421,6 +423,7 @@
     state.lists = data.lists;
     state.version = data.version;
     state.categories = data.categories || [];
+    state.types = data.types || [];
     renderProducts();
     renderCategoriesTab();
   }
@@ -644,6 +647,7 @@
     renderGroups();
     renderBadges();
     renderCategoryChecks();
+    renderTypeChecks();
     renderPreview();
     $('editor').hidden = false;
     document.body.style.overflow = 'hidden';
@@ -891,6 +895,22 @@
       } }),
       category.title, category.hidden ? ' (مخفي)' : ''
     )));
+  }
+
+  function typeCheckList(selected, onChange) {
+    if (!(state.types || []).length) return h('p', { class: 'hint', text: 'ما كاين حتى نوع. زيدهم من «المزيد ← الأنواع».' });
+    return h('div', { class: 'check-list' }, ...state.types.map((t) => h('label', { class: 'check-pill' },
+      h('input', { type: 'checkbox', checked: selected.includes(t.id), onchange: (e) => onChange(t.id, e.target.checked) }),
+      t.title)));
+  }
+
+  function renderTypeChecks() {
+    const draft = state.editing.draft;
+    draft.types = Array.isArray(draft.types) ? draft.types : [];
+    $('typeChecks').replaceChildren(typeCheckList(draft.types, (id, on) => {
+      draft.types = on ? [...new Set([...draft.types, id])].slice(0, 5) : draft.types.filter((x) => x !== id);
+      markDirty();
+    }));
   }
 
   // Save from the editor
@@ -1183,6 +1203,7 @@
       const data = await api('/inbox');
       state.inbox = data.items;
       state.inboxCategories = data.categories || [];
+      if (data.types) state.types = data.types;
       setInboxCount(data.items.length);
       renderInbox();
     } catch (error) {
@@ -1206,7 +1227,7 @@
   function inboxCard(item) {
     const form = {
       images: [...item.images], title: item.title, price: String(item.price), oldPrice: String(item.oldPrice || ''),
-      description: item.description || '', categories: [...(item.categories || [])]
+      description: item.description || '', categories: [...(item.categories || [])], types: [...(item.types || [])]
     };
     const m = item.market || {};
     const card = h('article', { class: 'inbox-card' });
@@ -1270,7 +1291,7 @@
         await api('/inbox/publish', { method: 'POST', body: {
           id: item.id, title: form.title.trim(), price: Number(form.price),
           oldPrice: form.oldPrice ? Number(form.oldPrice) : 0, description: form.description,
-          categories: form.categories, images: form.images, hidden
+          categories: form.categories, types: form.types, images: form.images, hidden
         } });
         toast(hidden ? 'تزاد مخفي ✓ تقدر تكملو من «المنتجات»' : 'تزاد للمتجر ✓ راه ظاهر دابا', 'success');
         state.inbox = state.inbox.filter((x) => x.id !== item.id);
@@ -1332,6 +1353,10 @@
       h('label', { class: 'field' }, h('span', { text: 'الوصف' }), description),
       aiButton, aiBox,
       h('div', {}, h('small', { class: 'muted', text: 'التصنيف:' }), cats),
+      h('div', {}, h('small', { class: 'muted', text: 'النوع (للمنتوجات المشابهة):' }),
+        typeCheckList(form.types, (id, on) => {
+          form.types = on ? [...new Set([...form.types, id])].slice(0, 5) : form.types.filter((x) => x !== id);
+        })),
       h('div', { class: 'inbox-actions' }, addBtn, hideBtn, dropBtn),
       h('div', { class: 'inbox-meta' },
         h('small', { class: 'muted', text: `${item.source || ''} · ${new Date(item.created * 1000).toLocaleString('fr-MA', { dateStyle: 'short', timeStyle: 'short' })}` }),
@@ -1551,6 +1576,108 @@
   function saveCategories(categories, message) {
     return saveLists(clone(state.lists), message, categories);
   }
+
+  // ------------------------------------------------------------ product types
+  async function saveTypes(next, message) {
+    try {
+      const data = await api('/types', { method: 'PUT', body: { types: next } });
+      state.types = data.types;
+      renderTypesTab();
+      toast(message, 'success');
+    } catch (error) { toast(error.message, 'error'); }
+  }
+
+  function renderTypesTab() {
+    const list = $('typeList');
+    const types = state.types || [];
+    const count = (id) => allProducts().filter(({ product }) => (product.types || []).includes(id)).length;
+    list.replaceChildren(...types.map((t, index) => h('article', { class: 'category-row' },
+      h('div', { class: 'category-head' }, h('div', {}, h('strong', { text: t.title }), h('div', { class: 'hint', text: `${count(t.id)} منتج` }))),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'بدّل السمية', icon: 'edit', onclick: () => {
+          const title = (prompt('السمية الجديدة ديال النوع:', t.title) || '').trim();
+          if (!title || title === t.title) return;
+          const next = clone(types); next[index].title = title; saveTypes(next, 'تبدلات السمية');
+        } }),
+        h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف', icon: 'trash', onclick: () => {
+          if (!confirm(`تحيد النوع «${t.title}»؟ المنتوجات ما كيتمسحوش، غير كيتحيد منهم هاد النوع.`)) return;
+          saveTypes(types.filter((_, i) => i !== index), 'تحيد النوع');
+        } }))))
+    );
+    if (!types.length) list.replaceChildren(h('p', { class: 'empty', text: 'ما كاين حتى نوع.' }));
+  }
+  $('addTypeBtn').addEventListener('click', () => {
+    const title = (prompt('سمية النوع الجديد (مثلا: 🧸 الأطفال):') || '').trim();
+    if (title) saveTypes([...(state.types || []), { title }], 'تزاد النوع ✓');
+  });
+
+  // ------------------------------------------------------------------ banners
+  state.banners = null;
+  async function loadBanners() {
+    try {
+      const data = await api('/banners');
+      state.banners = data.banners || {};
+      state.bannersWereSet = data.banners !== null;
+    } catch (error) { toast(error.message, 'error'); return; }
+    const scope = $('bannerScope');
+    const current = scope.value || 'home';
+    scope.replaceChildren(h('option', { value: 'home', text: '🏠 الرئيسية' }),
+      ...state.categories.map((c) => h('option', { value: c.id, text: `📂 ${c.title}` })));
+    scope.value = [...scope.options].some((o) => o.value === current) ? current : 'home';
+    renderBanners();
+  }
+  $('bannerScope').addEventListener('change', renderBanners);
+
+  function renderBanners() {
+    const scope = $('bannerScope').value || 'home';
+    const slides = state.banners[scope] || (state.banners[scope] = []);
+    const linkOptions = [h('option', { value: '', text: 'بلا رابط' }),
+      ...state.categories.map((c) => h('option', { value: `/c/${c.id}`, text: `📂 ${c.title}` })),
+      ...allProducts().map(({ product }) => h('option', { value: `/p/${product['pro-id123']}`, text: `🛍 ${product.title}` }))];
+    const list = $('bannerList');
+    if (!slides.length) {
+      list.replaceChildren(h('p', { class: 'hint', text: scope === 'home'
+        ? (state.bannersWereSet ? 'ما كاين حتى صورة: البانر ما غاديش يبان فالرئيسية.' : 'مازال ما زدتي والو: كيبانو الصور القدام ديال الموقع (السماعات) حتى تزيد ديالك وتحفظ.')
+        : 'ما كاين حتى صورة لهاد التصنيف: كيبانو صور الرئيسية.' }));
+      return;
+    }
+    list.replaceChildren(...slides.map((slide, index) => {
+      const select = h('select', { onchange: (e) => { slide.link = e.target.value; } }, ...linkOptions.map((o) => o.cloneNode(true)));
+      select.value = slide.link || '';
+      const move = (step) => {
+        const target = index + step;
+        if (target < 0 || target >= slides.length) return;
+        [slides[index], slides[target]] = [slides[target], slides[index]];
+        renderBanners();
+      };
+      return h('article', { class: 'banner-item' },
+        h('img', { src: slide.image, alt: '' }),
+        h('label', { class: 'field' }, h('span', { text: 'فاش يضغط عليها الزبون' }), select),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'لفوق', icon: 'up', disabled: index === 0, onclick: () => move(-1) }),
+          h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'لتحت', icon: 'down', disabled: index === slides.length - 1, onclick: () => move(1) }),
+          h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف', icon: 'trash', onclick: () => { slides.splice(index, 1); renderBanners(); } })));
+    }));
+  }
+
+  $('addBannerBtn').addEventListener('click', () => {
+    const scope = $('bannerScope').value || 'home';
+    const slides = state.banners[scope] || (state.banners[scope] = []);
+    if (slides.length >= 10) return toast('الحد 10 صور', 'error');
+    pickImage((url) => { slides.push({ image: url, link: '' }); renderBanners(); toast('تزادت ✓ ما تنساش «حفظ البانر»', 'success'); });
+  });
+
+  $('saveBannersBtn').addEventListener('click', async () => {
+    try {
+      const clean = {};
+      Object.entries(state.banners).forEach(([scope, slides]) => { if (slides.length || scope === 'home') clean[scope] = slides; });
+      const data = await api('/banners', { method: 'PUT', body: { banners: clean } });
+      state.banners = data.banners;
+      state.bannersWereSet = true;
+      renderBanners();
+      toast('تحفظ البانر ✓ راه ظاهر فالمتجر', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+  });
 
   function renderCategoriesTab() {
     const container = $('categoryList');

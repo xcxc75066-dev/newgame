@@ -95,7 +95,8 @@
     video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>',
     play: '<path d="M7 4v16l13-8z" fill="currentColor"/>',
     left: '<path d="m15 18-6-6 6-6"/>',
-    right: '<path d="m9 18 6-6-6-6"/>'
+    right: '<path d="m9 18 6-6-6-6"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/>'
   };
 
   function icon(name) {
@@ -290,10 +291,10 @@
   $('shopLink').querySelector('small').textContent = shopBase().replace(/^https?:\/\//, '');
 
   // ---------------------------------------------------------------- navigation
-  const VIEWS = ['home', 'orders', 'products', 'stats', 'more', 'categories', 'history'];
+  const VIEWS = ['home', 'orders', 'products', 'stats', 'more', 'categories', 'history', 'inbox'];
   function switchTab(name) {
     state.tab = name;
-    const navName = name === 'categories' || name === 'history' ? 'more' : name;
+    const navName = name === 'categories' || name === 'history' ? 'more' : name === 'inbox' ? 'products' : name;
     document.querySelectorAll('#navTabs button[data-tab]').forEach((button) => {
       const active = button.dataset.tab === navName;
       button.classList.toggle('active', active);
@@ -307,6 +308,7 @@
     if (name === 'categories') renderCategoriesTab();
     if (name === 'stats') loadStats();
     if (name === 'history') loadHistory();
+    if (name === 'inbox') loadInbox();
   }
   document.querySelectorAll('#navTabs button[data-tab]').forEach((button) => {
     button.addEventListener('click', () => switchTab(button.dataset.tab));
@@ -376,6 +378,10 @@
 
       const alerts = [];
       const a = d.alerts;
+      setInboxCount(d.inbox || 0);
+      if (d.inbox) alerts.push(h('button', { type: 'button', class: 'alert-row', onclick: () => switchTab('inbox') },
+        h('span', { class: 'alert-icon gold' }, icon('inbox')),
+        h('span', { class: 'grow' }, h('b', { text: `${d.inbox} منتوج جديد من الموردين فالوارد` }), h('small', { text: 'فحصهم وقرر: تزيدهم للمتجر ولا لا' }))));
       a.suspicious.forEach((s) => alerts.push(h('button', { type: 'button', class: 'alert-row', onclick: () => { state.orders.status = ''; switchTab('orders'); } },
         h('span', { class: 'alert-icon' }, icon('alert')),
         h('span', { class: 'grow' }, h('b', { text: `رقم طلب ${s.orders} مرات فـ 24 ساعة` }), h('small', { dir: 'ltr', text: s.phone })))));
@@ -1133,6 +1139,167 @@
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
     if (!blob) throw new Error('تعذر تجهيز الصورة.');
     return blob;
+  }
+
+  // -------------------------------------------------- inbox (supplier products)
+  function setInboxCount(count) {
+    $('inboxCount').textContent = String(count || 0);
+    $('inboxCount').classList.toggle('zero', !count);
+  }
+
+  async function loadInbox() {
+    const list = $('inboxList');
+    list.replaceChildren(h('div', { class: 'spinner' }));
+    try {
+      const data = await api('/inbox');
+      state.inbox = data.items;
+      state.inboxCategories = data.categories || [];
+      setInboxCount(data.items.length);
+      renderInbox();
+    } catch (error) {
+      list.replaceChildren(h('p', { class: 'hint', text: error.message }));
+    }
+  }
+  $('refreshInbox').addEventListener('click', loadInbox);
+
+  function renderInbox() {
+    const items = state.inbox || [];
+    if (!items.length) {
+      $('inboxList').replaceChildren(h('div', { class: 'alert-row' },
+        h('span', { class: 'alert-icon calm' }, icon('check')),
+        h('span', { class: 'grow' }, h('b', { text: 'الوارد خاوي' }),
+          h('small', { text: 'المنتجات الجداد اللي كيلقا البوت ديال الموردين كيبانو هنا.' }))));
+      return;
+    }
+    $('inboxList').replaceChildren(...items.map(inboxCard));
+  }
+
+  function inboxCard(item) {
+    const form = {
+      images: [...item.images], title: item.title, price: String(item.price), oldPrice: String(item.oldPrice || ''),
+      description: item.description || '', categories: [...(item.categories || [])]
+    };
+    const m = item.market || {};
+    const card = h('article', { class: 'inbox-card' });
+
+    // photos: tap to keep / drop; the first kept one is the main photo
+    const strip = h('div', { class: 'photo-strip' });
+    const drawPhotos = () => strip.replaceChildren(...item.images.map((url) => {
+      const index = form.images.indexOf(url);
+      return h('button', {
+        type: 'button', class: `pick-photo${index < 0 ? ' off' : ''}`, 'aria-pressed': String(index >= 0),
+        onclick: () => {
+          form.images = index >= 0 ? form.images.filter((u) => u !== url) : [...form.images, url];
+          drawPhotos();
+        }
+      }, h('img', { src: url, alt: '', loading: 'lazy' }),
+      index === 0 ? h('span', { class: 'main-tag', text: 'الرئيسية' }) : null,
+      h('span', { class: 'tick' }, icon(index >= 0 ? 'check' : 'close')));
+    }));
+    drawPhotos();
+
+    const facts = [];
+    if (m.score != null) facts.push(`🎯 فرصة ${Math.round(m.score)}/100`);
+    if (m.presence != null) facts.push(`🇲🇦 كاين فالمغرب ${Math.round(m.presence)}%`);
+    if (m.morocco) facts.push(`🛒 السوق فالمغرب ~${money(m.morocco)}`);
+    if (m.world && !m.morocco) facts.push(`🌍 برا ~${money(m.world)}`);
+    if (item.cost) facts.push(`💼 ثمن الشرا ${money(item.cost)}`);
+    if (m.brand) facts.push(`🏷 فيه ماركة: ${m.brand}`);
+
+    const title = h('input', { value: form.title, dir: 'auto', maxlength: '120', oninput: (e) => { form.title = e.target.value; } });
+    const nameChips = h('div', { class: 'chips wrap' }, ...(item.names || []).map((name) => h('button', {
+      type: 'button', class: 'chip small', onclick: () => { form.title = name; title.value = name; }
+    }, name)));
+
+    const hint = h('p', { class: 'note' });
+    const drawHint = () => {
+      const p = Number(form.price), o = Number(form.oldPrice);
+      const parts = [];
+      if (o > p && p > 0) parts.push(`تخفيض ${Math.round(((o - p) / o) * 100)}% · توفير ${money(o - p)}`);
+      if (item.cost && p) parts.push(`الربح ${money(p - item.cost)}`);
+      hint.textContent = parts.join(' · ') || 'بلا ثمن قديم = بلا تخفيض';
+      hint.className = `note${o - p > BEST_OFFER_MIN_SAVING ? ' good' : ''}`;
+    };
+    const price = h('input', { value: form.price, inputmode: 'decimal', dir: 'ltr', oninput: (e) => { form.price = e.target.value.replace(',', '.'); drawHint(); } });
+    const oldPrice = h('input', { value: form.oldPrice, inputmode: 'decimal', dir: 'ltr', placeholder: 'اختياري', oninput: (e) => { form.oldPrice = e.target.value.replace(',', '.'); drawHint(); } });
+    drawHint();
+
+    const cats = state.inboxCategories.length
+      ? h('div', { class: 'check-list' }, ...state.inboxCategories.map((c) => h('label', { class: 'check-pill' },
+        h('input', { type: 'checkbox', checked: form.categories.includes(c.id), onchange: (e) => {
+          form.categories = e.target.checked ? [...new Set([...form.categories, c.id])] : form.categories.filter((id) => id !== c.id);
+        } }), c.title, c.hidden ? ' (مخفي)' : '')))
+      : h('p', { class: 'hint', text: 'ما كاين حتى تصنيف. زيدهم من «المزيد ← التصنيفات».' });
+
+    const decide = async (hidden, button) => {
+      if (!form.title.trim()) return toast('كتب سمية المنتوج', 'error');
+      if (!(Number(form.price) > 0)) return toast('كتب الثمن', 'error');
+      if (!form.images.length) return toast('ختار على الأقل تصويرة وحدة', 'error');
+      if (!form.categories.length && state.inboxCategories.length && !confirm('ما ختاريتي حتى تصنيف. نزيدو بلا تصنيف؟')) return;
+      button.disabled = true;
+      try {
+        await api('/inbox/publish', { method: 'POST', body: {
+          id: item.id, title: form.title.trim(), price: Number(form.price),
+          oldPrice: form.oldPrice ? Number(form.oldPrice) : 0, description: form.description,
+          categories: form.categories, images: form.images, hidden
+        } });
+        toast(hidden ? 'تزاد مخفي ✓ تقدر تكملو من «المنتجات»' : 'تزاد للمتجر ✓ راه ظاهر دابا', 'success');
+        state.inbox = state.inbox.filter((x) => x.id !== item.id);
+        setInboxCount(state.inbox.length);
+        renderInbox();
+        await loadProducts();
+      } catch (error) {
+        toast(error.message, 'error');
+        button.disabled = false;
+      }
+    };
+    const addBtn = h('button', { type: 'button', class: 'btn primary block', onclick: (e) => decide(false, e.currentTarget) }, icon('check'), 'زيد للمتجر');
+    const hideBtn = h('button', { type: 'button', class: 'btn ghost block', onclick: (e) => decide(true, e.currentTarget) }, icon('eyeOff'), 'زيد مخفي');
+    const dropBtn = h('button', { type: 'button', class: 'btn danger block', onclick: async () => {
+      if (!confirm('تحيد هاد المنتوج من الوارد؟')) return;
+      try {
+        await api('/inbox/delete', { method: 'POST', body: { id: item.id } });
+        state.inbox = state.inbox.filter((x) => x.id !== item.id);
+        setInboxCount(state.inbox.length);
+        renderInbox();
+      } catch (error) { toast(error.message, 'error'); }
+    } }, icon('trash'), 'حيد');
+
+    card.append(
+      strip,
+      facts.length ? h('div', { class: 'facts' }, ...facts.map((f) => h('span', { text: f }))) : null,
+      h('label', { class: 'field' }, h('span', { text: 'سمية المنتوج' }), title),
+      (item.names || []).length > 1 ? h('div', {}, h('small', { class: 'muted', text: 'اقتراحات من Google:' }), nameChips) : null,
+      h('div', { class: 'grid-2' },
+        h('label', { class: 'field' }, h('span', { text: 'الثمن (DH)' }), price),
+        h('label', { class: 'field' }, h('span', { text: 'قبل التخفيض' }), oldPrice)),
+      hint,
+      h('label', { class: 'field' }, h('span', { text: 'الوصف' }),
+        h('textarea', { rows: '3', dir: 'auto', maxlength: '2000', oninput: (e) => { form.description = e.target.value; } }, form.description)),
+      h('div', {}, h('small', { class: 'muted', text: 'التصنيف:' }), cats),
+      h('div', { class: 'inbox-actions' }, addBtn, hideBtn, dropBtn),
+      h('div', { class: 'inbox-meta' },
+        h('small', { class: 'muted', text: `${item.source || ''} · ${new Date(item.created * 1000).toLocaleString('fr-MA', { dateStyle: 'short', timeStyle: 'short' })}` }),
+        item.link ? h('a', { href: item.link, target: '_blank', rel: 'noopener', text: 'البوست ديال المورد ↗' }) : null)
+    );
+    return card;
+  }
+
+  $('showLinkBtn').addEventListener('click', () => showLink(false));
+  $('resetLinkBtn').addEventListener('click', () => {
+    if (confirm('بدل الكود؟ البوت ديال الموردين غادي يحتاج تعاود تربطو بالسطر الجديد.')) showLink(true);
+  });
+  async function showLink(reset) {
+    try {
+      const data = await api('/inbox/link', { method: 'POST', body: { reset } });
+      const box = $('linkLine');
+      box.hidden = false;
+      box.replaceChildren(h('code', { text: data.line }), h('button', { type: 'button', class: 'btn secondary', onclick: async () => {
+        try { await navigator.clipboard.writeText(data.line); toast('تنسخ ✓', 'success'); }
+        catch (_) { toast('نسخو بيدك (ضغط مطول على السطر)', 'error'); }
+      } }, icon('copy'), 'نسخ'));
+      if (reset) toast('تبدل الكود. عاود الربط فالبوت ديال الموردين.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
   }
 
   // ------------------------------------------------------------------ orders

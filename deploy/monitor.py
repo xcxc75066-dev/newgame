@@ -64,6 +64,11 @@ CHECK_MOROCCO = True
 SEARCH_ENGINE = "serpapi"
 SERPAPI_KEY = ""
 VISION_KEY = ""
+# التحقق بالتصاور: Gemini كيقارن التصويرة ديال المورد مع كل نتيجة مغربية (✅ نفس الموديل / 🟡 مشابه / ❌ مختالف)
+# والوجود فالمغرب كيتحسب غير بـ ✅. خاوي = بلا تحقق (بحال قبل)
+GEMINI_KEY = ""
+# خاوي = أحدث موديل "flash" اللي كيقبل المفتاح
+GEMINI_MODEL = ""
 # False = كيعلمك بكلشي حتى المنتشر فالمغرب 100% (مع التقرير). True = كيدوز اللي فايت EXPOSED_THRESHOLD
 SKIP_EXPOSED = False
 # من شحال % ديال الوجود فالمغرب كنعتبروه مفضوح
@@ -130,15 +135,18 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 STARTED_AT = time.time()
 
 # buttons of the bot keyboard
-BTN_ADD, BTN_LIST = "➕ زيد قناة", "📋 القنوات"
-BTN_KW, BTN_STATUS = "🔑 الكلمات", "📊 الحالة"
-BTN_PAUSE, BTN_RESUME = "⏸ وقف", "▶️ شغل"
-BTN_MODE = "🔄 غير التصاور / مع النص"
-BTN_TEST = "🔔 جرب الإشعارات"
-BTN_SHOP = "🛒 ربط المتجر"
-KEYBOARD = json.dumps({"keyboard": [[BTN_ADD, BTN_LIST], [BTN_KW, BTN_STATUS],
-                                    [BTN_PAUSE, BTN_RESUME], [BTN_MODE], [BTN_TEST, BTN_SHOP]],
-                       "resize_keyboard": True, "is_persistent": True})
+# Small keyboard: 2 rows, hidden by default (open it with the ⌨️ button next to the text box).
+BTN_LIST, BTN_ADD, BTN_KW, BTN_STATUS = "📋 القنوات", "➕ قناة", "🔑 كلمات", "📊 الحالة"
+BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST = "⏯ وقف/شغل", "🔄 الوضع", "🛒 المتجر", "🔔 تجربة"
+BTN_LAST = "🔍 Gemini"  # what Gemini saw and answered for the last product
+BTN_PAUSE, BTN_RESUME = "⏸ وقف", "▶️ شغل"  # old buttons, still understood
+KEYBOARD = json.dumps({"keyboard": [[BTN_LIST, BTN_ADD, BTN_KW, BTN_STATUS],
+                                    [BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST, BTN_LAST]],
+                       "resize_keyboard": True, "one_time_keyboard": True, "is_persistent": False,
+                       "input_field_placeholder": "⌨️ = الأزرار"})
+# the texts of the old, bigger keyboard (people may still press them)
+OLD_BUTTONS = {"➕ زيد قناة": BTN_ADD, "🔑 الكلمات": BTN_KW, "🔄 غير التصاور / مع النص": BTN_MODE,
+               "🔔 جرب الإشعارات": BTN_TEST, "🛒 ربط المتجر": BTN_SHOP, "/menu": "/menu"}
 
 
 def log(msg):
@@ -342,15 +350,17 @@ def bot_api(method, params=None, timeout=30):
 
 
 def bot_upload(method, fields, files):
-    """multipart/form-data upload. files = {name: (filename, bytes)}"""
+    """multipart/form-data upload. files = {name: (filename, bytes)} or (filename, bytes, content type)"""
     boundary = uuid.uuid4().hex
     body = bytearray()
     for k, v in fields.items():
         body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n".encode()
         body += str(v).encode() + b"\r\n"
-    for k, (fname, data) in files.items():
+    for k, file in files.items():
+        fname, data = file[0], file[1]
+        mime = file[2] if len(file) > 2 else "image/jpeg"
         body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"; filename=\"{fname}\"\r\n"
-                 "Content-Type: image/jpeg\r\n\r\n").encode()
+                 f"Content-Type: {mime}\r\n\r\n").encode()
         body += data + b"\r\n"
     body += f"--{boundary}--\r\n".encode()
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -497,7 +507,7 @@ def search_serpapi(photo_url):
                     "price": pr.get("extracted_value"),
                     "cur": _norm_currency(pr.get("currency"), pr.get("value")),
                     "rating": m.get("rating"), "reviews": m.get("reviews"),
-                    "exact": bool(m.get("exact_matches"))})
+                    "exact": bool(m.get("exact_matches")), "thumb": m.get("thumbnail") or ""})
     return out[:60]
 
 
@@ -604,7 +614,7 @@ def classify(r):
         if d:
             return cat, d
     if host.endswith(".ma") or _domain_in(host, path, MA_PLATFORMS):
-        return "ma_store", host
+        return "ma_store", re.sub(r"^www\.", "", host)
     d = _domain_in(host, path, SHIPS_TO_MA)
     if d:
         return "ships_ma", d.split("/")[0]
@@ -615,7 +625,7 @@ def classify(r):
     if d:
         return "sourcing", d
     if ma:
-        return "other_ma", host
+        return "other_ma", re.sub(r"^www\.", "", host)
     d = _domain_in(host, path, GLOBAL_MARKETS)
     if d:
         return "global", d.strip(".")
@@ -707,19 +717,34 @@ def analyze(results, text="", seen=None):
         cat, dom = classify(r)
         cats.setdefault(cat, []).append(dict(r, dom=dom, w=_weight(r)))
 
-    # 1) presence in Morocco
+    # 1) presence in Morocco (when Gemini checked the pictures, only "same model" counts)
     presence, breakdown = 0.0, []
+    similar, different, unchecked = {}, {}, {}  # site -> how many results
+    checked = any(r.get("match") for r in results)
+
+    def site_counts(items):
+        counts = {}
+        for h in items:
+            counts[h["dom"]] = counts.get(h["dom"], 0) + 1
+        return counts
+
     for cat, (first, nxt, cap) in PRESENCE_POINTS.items():
         hits = sorted(cats.get(cat, []), key=lambda x: -x["w"])
+        for site, n in site_counts([h for h in hits if h.get("match") == "similar"]).items():
+            similar[site] = similar.get(site, 0) + n
+        for site, n in site_counts([h for h in hits if h.get("match") == "different"]).items():
+            different[site] = different.get(site, 0) + n
+        for site, n in site_counts([h for h in hits if h.get("match") == "unchecked"]).items():
+            unchecked[site] = unchecked.get(site, 0) + n
+        # checked by Gemini: only the same model counts. Not checked at all: as before
+        hits = [h for h in hits if h.get("match") == "same" or (not checked and h.get("match") is None)]
         if not hits:
             continue
         pts = sum((first if i == 0 else nxt) * h["w"] for i, h in enumerate(hits[:cap]))
         presence += pts
-        doms = []
-        for h in hits:
-            if h["dom"] not in doms:
-                doms.append(h["dom"])
-        breakdown.append((cat, len(hits), round(pts), doms[:3]))
+        counts = site_counts(hits)
+        doms = [f"{d} ×{n}" if n > 1 else d for d, n in sorted(counts.items(), key=lambda x: -x[1])]
+        breakdown.append((cat, len(hits), round(pts), doms[:4]))
     presence = min(100, round(presence))
 
     # 2) global demand
@@ -748,6 +773,8 @@ def analyze(results, text="", seen=None):
             except (TypeError, ValueError):
                 continue
             if cat in MA_CATS and h["cur"] == "MAD":
+                if h.get("match") in ("similar", "different", "unchecked"):
+                    continue  # another model (or not checked): its price says nothing about ours
                 ma_prices.append(mad)
             elif cat == "sourcing":
                 wholesale.append(mad)
@@ -835,16 +862,24 @@ def analyze(results, text="", seen=None):
         adv.append(f"⭐ تقييمات مزيانة برا ({rating}/5، {reviews} تقييم): منتوج مجرب")
 
     # top links: Moroccan first, then global
-    top_ma = sorted((h for c in MA_CATS for h in cats.get(c, [])), key=lambda x: -x["w"])[:3]
+    order = {"same": 0, None: 1, "similar": 2, "unchecked": 3}
+    top_ma = sorted((h for c in MA_CATS for h in cats.get(c, []) if h.get("match") != "different"),
+                    key=lambda x: (order.get(x.get("match"), 3), -x["w"]))[:4]
     top_gl = sorted(cats.get("global", []), key=lambda x: -x["w"])[:2]
 
     return {"ok": True, "n": n, "presence": presence, "breakdown": breakdown, "demand": demand,
+            "checked": checked,
+            "similar": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(similar.items(), key=lambda x: -x[1])],
+            "different": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(different.items(), key=lambda x: -x[1])],
+            "unchecked": [f"{d} ×{n}" if n > 1 else d for d, n in sorted(unchecked.items(), key=lambda x: -x[1])],
             "gdoms": gdoms, "reviews": reviews, "rating": rating, "sp": sp,
             "ma_prices": ma_prices, "world_prices": world_prices, "wholesale": wholesale, "margin": margin,
             "margin_ref": margin_ref, "qty": qty, "capital": capital, "profit": profit, "brand": brand,
             "nch": nch, "reposted": reposted, "opp": opp,
             "verdict": verdict, "confidence": confidence, "advice": adv,
-            "top": [(h["dom"], h["title"], h["link"]) for h in top_ma + top_gl],
+            "top": [(h["dom"], h["title"], h["link"],
+                     {"same": "✅ ", "similar": "🟡 ", "unchecked": "❔ "}.get(h.get("match"), ""), h.get("pos"))
+                    for h in top_ma + top_gl],
             "titles": [r.get("title") or "" for r in sorted(results, key=lambda r: r.get("pos") or 99)[:20]]}
 
 
@@ -880,11 +915,19 @@ def build_report(rep, title):
          f"🎯 {rep['verdict']}" + ("" if rep["opp"] is None else f" — {rep['opp']}/100"),
          f"🧭 الثقة فالتحليل: {rep['confidence']} ({rep['n']} نتيجة)", "━━━━━━━━━━━━",
          f"🇲🇦 الوجود فالمغرب: {rep['presence']}%"]
+    if rep.get("checked"):
+        L.append("  (تحقق بالتصاور: كيتحسب غير ✅ نفس الموديل)")
     if rep["breakdown"]:
         for cat, cnt, pts, doms in rep["breakdown"]:
-            L.append(f"  {CAT_LABEL[cat]}: {cnt} (+{pts}) — {', '.join(doms)}")
+            L.append(f"  {'✅ ' if rep.get('checked') else ''}{CAT_LABEL[cat]}: {cnt} (+{pts}) — {', '.join(doms)}")
     else:
-        L.append("  ما بان فحتى موقع مغربي")
+        L.append("  ما بان فحتى موقع مغربي" + (" بنفس الموديل" if rep.get("checked") else ""))
+    if rep.get("similar"):
+        L.append("  🟡 مشابه، ماشي نفس الموديل (ما تحسبش): " + ", ".join(rep["similar"][:6]))
+    if rep.get("different"):
+        L.append("  ❌ مختالف (ما تحسبش): " + ", ".join(rep["different"][:6]))
+    if rep.get("unchecked"):
+        L.append("  ❔ ما تحققاتش (ما تحسبش): " + ", ".join(rep["unchecked"][:6]))
     L.append(f"\n🌍 الطلب العالمي: {_lvl(rep['demand'])} ({rep['demand']}/100)")
     if rep["gdoms"]:
         L.append("  كاين فـ: " + ", ".join(rep["gdoms"][:6]))
@@ -894,7 +937,7 @@ def build_report(rep, title):
     L.append(f"  ثمن المورد: {_money(rep['sp']) if rep['sp'] else 'ما لقيتوش فالنص'}")
     if rep["ma_prices"]:
         p = rep["ma_prices"]
-        L.append(f"  فالمغرب: {_range(p)}")
+        L.append(f"  فالمغرب{' (نفس الموديل)' if rep.get('checked') else ''}: {_range(p)}")
     if rep["world_prices"]:
         p = rep["world_prices"]
         L.append(f"  برا (تقريبي): {_range(p)}")
@@ -915,9 +958,279 @@ def build_report(rep, title):
         L += [f"  {a}" for a in rep["advice"]]
     if rep["top"]:
         L.append("\n🔗 أهم الروابط:")
-        L += [f"  • {d} — {t[:45]}\n    {l}" for d, t, l in rep["top"]]
+        L += [f"  • {mark}{d} — {t[:45]}" + (f" (رتبة {pos})" if pos else "") + f"\n    {l}"
+              for d, t, l, mark, pos in rep["top"]]
     L.append("\nℹ️ البحث بالتشابه ديال الصورة، يعني شوف الروابط قبل ما تقرر.")
     return "\n".join(L)
+
+
+GEMINI_PROMPT = """You compare product photos for a shop. Image 0 is the supplier's product.
+Images 1..N were found online. For each of them say if it shows:
+- "same": the same product model (same shape, buttons, parts, design; color or photo angle may differ)
+- "similar": the same kind of product but another model
+- "different": another product
+Look at details (shape, buttons, number of parts, design), not only at the type of product.
+Answer only with JSON: {"r": [{"i": 1, "v": "same"}, ...]} for every image 1..N."""
+_GEMINI_MODEL_FOUND = ""
+_GEMINI_LAST_MODEL = ""
+_GEMINI_EXCHANGES = []  # [(request body, full answer)] of the current check, for the 🔍 Gemini button
+
+
+def _mime(data):
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    return ""
+
+
+def _gemini(body):
+    global _GEMINI_MODEL_FOUND
+    base = "https://generativelanguage.googleapis.com/v1beta"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY, "User-Agent": UA}
+
+    def call(model):
+        global _GEMINI_LAST_MODEL
+        _GEMINI_LAST_MODEL = model
+        req = urllib.request.Request(f"{base}/models/{model}:generateContent", data=json.dumps(body).encode(),
+                                     headers=headers)
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return json.loads(r.read().decode())
+
+    model = GEMINI_MODEL or _GEMINI_MODEL_FOUND or "gemini-2.5-flash"
+    try:
+        return call(model)
+    except urllib.error.HTTPError as e:
+        if e.code != 404 or GEMINI_MODEL:
+            raise
+    # the default model was renamed: take the newest "flash" model of this key
+    req = urllib.request.Request(f"{base}/models?pageSize=200", headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        models = json.loads(r.read().decode()).get("models", [])
+    names = [m["name"].split("/", 1)[-1] for m in models
+             if "generateContent" in (m.get("supportedGenerationMethods") or []) and "flash" in m.get("name", "")
+             and not re.search(r"image|tts|audio|live|embed|lite|exp|preview", m.get("name", ""))]
+    if not names:
+        raise RuntimeError("no Gemini flash model")
+    _GEMINI_MODEL_FOUND = max(names, key=lambda n: (float((re.findall(r"\d+(?:\.\d+)?", n) or ["0"])[0]), -len(n)))
+    return call(_GEMINI_MODEL_FOUND)
+
+
+COLLAGE_PROMPT = """You compare product photos for a shop.
+The FIRST image is the supplier's product.
+The SECOND image is a collage of pictures found online; each cell has a number in its top-left corner.
+For each numbered cell say if it shows:
+- "same": the same product model (same shape, buttons, parts, design; color or photo angle may differ)
+- "similar": the same kind of product but another model
+- "different": another product
+Look at details (shape, buttons, number of parts, design), not only at the type of product.
+Answer only with JSON: {"r": [{"i": 1, "v": "same"}, ...]} for every numbered cell."""
+VERIFY_MAX = 24        # Moroccan results checked per product
+COLLAGE_COLS = 5
+COLLAGE_CELL = 256
+
+
+def make_collage(pictures):
+    """All the pictures in one numbered grid (one image for Gemini instead of many:
+    far fewer tokens). Needs Pillow (apt-get install -y python3-pil); None without it."""
+    try:
+        import io
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    cols = min(COLLAGE_COLS, len(pictures))
+    rows = (len(pictures) + cols - 1) // cols
+    cell = COLLAGE_CELL
+    sheet = Image.new("RGB", (cols * cell, rows * cell), "white")
+    draw = ImageDraw.Draw(sheet)
+    try:
+        font = ImageFont.load_default(size=34)
+    except TypeError:  # older Pillow
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 34)
+        except OSError:
+            font = ImageFont.load_default()
+    for n, data in enumerate(pictures):
+        try:
+            picture = Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception:
+            continue
+        picture.thumbnail((cell - 8, cell - 8))
+        x, y = (n % cols) * cell, (n // cols) * cell
+        sheet.paste(picture, (x + (cell - picture.width) // 2, y + (cell - picture.height) // 2))
+        draw.rectangle([x, y, x + cell - 1, y + cell - 1], outline=(180, 180, 180), width=2)
+        draw.rectangle([x + 2, y + 2, x + 58, y + 48], fill=(200, 0, 0))
+        draw.text((x + 10, y + 6), str(n + 1), fill="white", font=font)
+    out = io.BytesIO()
+    sheet.save(out, "JPEG", quality=82)
+    return out.getvalue()
+
+
+def _ask_gemini(parts):
+    body = {"contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}
+    data = _gemini(body)
+    _GEMINI_EXCHANGES.append((body, data, _GEMINI_LAST_MODEL))
+    text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+    answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+    verdicts = {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
+    return verdicts, text
+
+
+def _inline(data):
+    return {"inline_data": {"mime_type": _mime(data), "data": base64.b64encode(data).decode()}}
+
+
+LAST_DIR = os.path.join(HERE, "last_check")
+
+
+def save_last_check(label, mine, collage, raw, pictures, mode):
+    """Keeps what Gemini saw and answered for the LAST product (button 🔍 Gemini)."""
+    try:
+        os.makedirs(LAST_DIR, exist_ok=True)
+        with open(os.path.join(LAST_DIR, "supplier.img"), "wb") as f:
+            f.write(mine)
+        collage_path = os.path.join(LAST_DIR, "collage.jpg")
+        if collage:
+            with open(collage_path, "wb") as f:
+                f.write(collage)
+        elif os.path.exists(collage_path):
+            os.remove(collage_path)
+        items = [{"n": i, "site": classify(r)[1], "rank": r.get("pos"), "title": (r.get("title") or "")[:80],
+                  "link": r.get("link", ""), "verdict": r.get("match", "")} for i, (r, _) in enumerate(pictures, 1)]
+        def readable(body, offset):
+            """The request as sent, each picture replaced by its name (the pictures come as photos)."""
+            copy = json.loads(json.dumps(body))
+            seen = 0
+            for content in copy.get("contents", []):
+                for part in content.get("parts", []):
+                    if "inline_data" not in part:
+                        continue
+                    size = len(base64.b64decode(part["inline_data"]["data"]))
+                    if seen == 0:
+                        name = "supplier.jpg"
+                    elif collage:
+                        name = "collage.jpg"
+                    else:
+                        name = f"result_{offset + seen}.jpg"
+                    part["inline_data"]["data"] = f"[صورة: {name} — {size} بايت]"
+                    seen += 1
+            return copy
+
+        exchanges = [{"model": model, "request": readable(body, n * 12), "response": answer}
+                     for n, (body, answer, model) in enumerate(_GEMINI_EXCHANGES)]
+        _save_json(os.path.join(LAST_DIR, "gemini_request.json"),
+                   {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label, "mode": mode,
+                    "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent",
+                    "exchanges": exchanges})
+        _save_json(os.path.join(LAST_DIR, "info.json"),
+                   {"time": time.strftime("%Y-%m-%d %H:%M"), "label": label, "mode": mode, "raw": raw,
+                    "items": items})
+    except Exception as e:
+        log(f"save last check failed: {e}")
+
+
+def show_last_check(cid):
+    info = _load_json(os.path.join(LAST_DIR, "info.json"))
+    if not info:
+        send(cid, "ما كاين حتى تحقق ديال Gemini مازال. تسنى أول منتوج جديد.")
+        return
+    try:
+        with open(os.path.join(LAST_DIR, "supplier.img"), "rb") as f:
+            bot_upload("sendPhoto", {"chat_id": cid, "caption": f"1️⃣ التصويرة ديال المورد — {info.get('label', '')}"},
+                       {"photo": ("supplier.jpg", f.read())})
+        collage_path = os.path.join(LAST_DIR, "collage.jpg")
+        if os.path.exists(collage_path):
+            with open(collage_path, "rb") as f:
+                bot_upload("sendPhoto", {"chat_id": cid,
+                                         "caption": f"2️⃣ الكولاج اللي شاف Gemini ({len(info.get('items', []))} نتيجة مغربية)"},
+                           {"photo": ("collage.jpg", f.read())})
+        else:
+            send(cid, "2️⃣ بلا كولاج: التصاور تصيفطو واحدة بواحدة (Pillow ما مثبتش: apt-get install -y python3-pil)")
+    except Exception as e:
+        log(f"show last check: {e}")
+    request_path = os.path.join(LAST_DIR, "gemini_request.json")
+    if os.path.exists(request_path):
+        try:
+            with open(request_path, "rb") as f:
+                bot_upload("sendDocument", {"chat_id": cid, "caption": "📄 الطلب كامل اللي مشى لـ Gemini (النصوص، الموديل، "
+                                            "الإعدادات) + الجواب كامل بلا قطع (مع عدد التوكنز)"},
+                           {"document": ("gemini_request.json", f.read(), "application/json")})
+        except Exception as e:
+            log(f"show last check (document): {e}")
+    icon = {"same": "✅", "similar": "🟡", "different": "❌", "unchecked": "❔"}
+    lines = [f"3️⃣ الجواب ديال Gemini ({info.get('time', '')}):"]
+    for item in info.get("items", []):
+        lines.append(f"{item['n']}. {icon.get(item['verdict'], '❔')} {item['verdict'] or '—'} · {item['site']} "
+                     f"(رتبة {item['rank']}) — {item['title'][:45]}")
+    lines += ["", "الجواب كيفما جا من Gemini (كامل فالملف 📄):", info.get("raw", "")[:1500]]
+    send(cid, "\n".join(lines))
+
+
+def verify_morocco(results, photo_url, photo_bytes, label=""):
+    """Gemini compares the supplier photo with the picture of every Moroccan result
+    and marks each one "same" / "similar" / "different" (in place).
+    All the Moroccan pictures go in ONE numbered collage (few tokens). Results that
+    could not be checked are marked "unchecked" and never count as the same model."""
+    if not GEMINI_KEY:
+        return False
+    moroccan = [r for r in results if "match" not in r and classify(r)[0] in MA_CATS]
+    if not moroccan:
+        return False
+    try:
+        mine = photo_bytes or http_get_bytes(photo_url)
+    except Exception as e:
+        log(f"verify: own photo failed: {e}")
+        return False
+    if not _mime(mine):
+        return False
+    pictures = []
+    for r in moroccan[:VERIFY_MAX]:
+        if not r.get("thumb"):
+            continue
+        try:
+            data = http_get_bytes(r["thumb"], timeout=30)
+        except Exception:
+            continue
+        if _mime(data) and len(data) < 4_000_000:
+            pictures.append((r, data))
+    if not pictures:
+        return False  # nothing could be looked at: keep the old way of counting
+    verdicts, raw = {}, ""
+    del _GEMINI_EXCHANGES[:]
+    if pictures:
+        collage = make_collage([data for _, data in pictures])
+        try:
+            if collage:
+                verdicts, raw = _ask_gemini([{"text": COLLAGE_PROMPT}, {"text": "Supplier product:"}, _inline(mine),
+                                             {"text": f"Collage of {len(pictures)} numbered pictures:"}, _inline(collage)])
+            else:  # no Pillow: one image each, 12 at a time
+                for start in range(0, len(pictures), 12):
+                    chunk = pictures[start:start + 12]
+                    parts = [{"text": GEMINI_PROMPT}, {"text": "Image 0 (supplier):"}, _inline(mine)]
+                    for i, (_, data) in enumerate(chunk, 1):
+                        parts += [{"text": f"Image {i}:"}, _inline(data)]
+                    chunk_verdicts, chunk_raw = _ask_gemini(parts)
+                    raw += chunk_raw + "\n"
+                    for i, v in chunk_verdicts.items():
+                        verdicts[start + i] = v
+        except Exception as e:
+            log(f"verify: Gemini failed: {e}")
+            return False
+    for i, (r, _) in enumerate(pictures, 1):
+        if verdicts.get(i) in ("same", "similar", "different"):
+            r["match"] = verdicts[i]
+    for r in moroccan:
+        r.setdefault("match", "unchecked")  # no picture, too far down, or no answer
+    save_last_check(label, mine, collage, raw, pictures, "collage" if collage else "one by one")
+    same = sum(1 for r in moroccan if r["match"] == "same")
+    log(f"verify: {same} same / {len(pictures)} checked / {len(moroccan)} Moroccan results"
+        f"{' (collage)' if pictures and make_collage and collage else ''}")
+    return True
 
 
 def analyze_photo(state, channel, photo_url, photo_bytes, text):
@@ -926,7 +1239,13 @@ def analyze_photo(state, channel, photo_url, photo_bytes, text):
     results, note = get_results(state, key, photo_url, photo_bytes)
     if results is None:
         return {"ok": False, "reason": note}
+    if verify_morocco(results, photo_url, photo_bytes, f"@{channel}" if channel else "منتوج"):
+        hit = cache()["img"].get(key)
+        if hit:
+            hit["results"] = results  # keep the verdicts: no second Gemini call for the same photo
+            save_cache()
     rep = analyze(results, text, seen)
+
     rep["note"] = note
     return rep
 
@@ -1011,7 +1330,7 @@ def send_to_shop(state, cid, key, quiet=False):
         say("❌ هاد المنتوج قديم بزاف. صيفط ليا البوست من جديد (Forward ولا الرابط).")
         return False
     if not (SHOP_URL and SHOP_TOKEN):
-        say(f"🛒 خاصك تربط المتجر أولا: ضغط «{BTN_SHOP}».", KEYBOARD)
+        say(f"🛒 خاصك تربط المتجر أولا: ضغط «{BTN_SHOP}».")
         return False
     photos = []
     for path in item.get("files", []):
@@ -1043,7 +1362,7 @@ def send_to_shop(state, cid, key, quiet=False):
         return True
     if status == 401:
         log("shop: link code refused (link again)")
-        say(f"❌ الربط مع المتجر ما بقاش صالح. خود السطر الجديد من الـ CMS (📥 الوارد) وعاود «{BTN_SHOP}».", KEYBOARD)
+        say(f"❌ الربط مع المتجر ما بقاش صالح. خود السطر الجديد من الـ CMS (📥 الوارد) وعاود «{BTN_SHOP}».")
     elif status == 0:
         say("❌ ما قدرتش نوصل للمتجر. تأكد بلي الموقع خدام وعاود.")
     else:
@@ -1058,7 +1377,7 @@ def link_shop(cid, text):
     url, _, token = line.partition("|")
     url, token = url.strip().rstrip("/"), token.strip()
     if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?", url) or len(token) < 32:
-        send(cid, "❌ هادا ماشي السطر الصحيح. فالـ CMS سير لـ «📥 الوارد ← ربط البوت ديال الموردين» ونسخ السطر كامل.", KEYBOARD)
+        send(cid, "❌ هادا ماشي السطر الصحيح. فالـ CMS سير لـ «📥 الوارد ← ربط البوت ديال الموردين» ونسخ السطر كامل.")
         return
     old = (SHOP_URL, SHOP_TOKEN)
     globals().update(SHOP_URL=url, SHOP_TOKEN=token)
@@ -1066,13 +1385,13 @@ def link_shop(cid, text):
     if status == 400:
         save_settings({"SHOP_URL": url, "SHOP_TOKEN": token})
         send(cid, f"✅ تربط المتجر ({url}).\n" + ("دابا كل منتوج جديد غادي يمشي بوحدو لـ «📥 الوارد» فالـ CMS."
-                   if AUTO_SHOP else "دابا تحت كل منتوج كاين زر «🛒 زيدو للمتجر»."), KEYBOARD)
+                   if AUTO_SHOP else "دابا تحت كل منتوج كاين زر «🛒 زيدو للمتجر»."))
         return
     globals().update(SHOP_URL=old[0], SHOP_TOKEN=old[1])
     if status == 401:
-        send(cid, "❌ الكود غالط ولا تبدل. خود السطر من جديد من الـ CMS (📥 الوارد).", KEYBOARD)
+        send(cid, "❌ الكود غالط ولا تبدل. خود السطر من جديد من الـ CMS (📥 الوارد).")
     else:
-        send(cid, f"❌ ما قدرتش نوصل للمتجر ({status or 'بلا جواب'}). تأكد من الموقع وعاود.", KEYBOARD)
+        send(cid, f"❌ ما قدرتش نوصل للمتجر ({status or 'بلا جواب'}). تأكد من الموقع وعاود.")
 
 
 # ----------------------------------------------------------------- one new post
@@ -1348,13 +1667,15 @@ def status_text(state):
             f"{' · كل منتوج كيمشي للوارد بوحدو' if (AUTO_SHOP and SHOP_URL) else ''}")
 
 
-HELP = ("استعمل الأزرار اللي لتحت 👇\n"
-        f"{BTN_ADD}: صيفط الرابط ديال القناة\n"
+HELP = ("⌨️ الأزرار كيتحلو بالزر ⌨️ حدا خانة الكتبة (ولا صيفط /menu):\n"
         f"{BTN_LIST}: تشوف القنوات وتحيد اللي بغيتي\n"
+        f"{BTN_ADD}: صيفط الرابط ديال القناة\n"
         f"{BTN_KW}: تبدل كلمات الفلتر\n"
-        f"{BTN_PAUSE} / {BTN_RESUME}: توقف ولا ترجع التتبع\n"
+        f"{BTN_STATUS}: الحالة ديال البوت\n"
+        f"{BTN_TOGGLE}: توقف ولا ترجع التتبع\n"
         f"{BTN_MODE}: غير البوستات اللي فيهم تصاور، ولا حتى النص\n"
         f"{BTN_TEST}: تتأكد بلي الإشعارات كيوصلو\n"
+        f"{BTN_LAST}: تشوف آخر تحقق ديال Gemini (التصويرتين + الجواب)\n"
         f"{BTN_SHOP}: تربط هاد البوت مع المتجر ديالك (مرة وحدة)\n\n"
         "🛡 ولا زيد البوت Admin فأي قناة (حتى الخاصة)، وغادي يسولك واش تقبلها\n\n"
         "📊 بغيتي تقرير على أي منتوج؟ صيفط ليا التصويرة ديالو، "
@@ -1491,8 +1812,11 @@ def handle_message(state, msg):
     fwd_chat = origin.get("chat") or msg.get("forward_from_chat") or {}
     fwd_id = origin.get("message_id") or msg.get("forward_from_message_id")
     post_link = parse_post_link(text)
+    text = OLD_BUTTONS.get(text, text)
 
-    if text == BTN_ADD:
+    if text in ("/menu", "/start"):
+        send(cid, "⌨️ ها هي الأزرار. كيتخباو بوحدهم من بعد ما تختار؛ ترجعهم بالزر ⌨️ حدا خانة الكتبة.", KEYBOARD)
+    elif text == BTN_ADD:
         waiting[str(cid)] = "add"
         send(cid, "صيفط ليا الرابط ديال القناة (ولا بزاف، كل واحد فسطر)\n"
                   "ولا دير Forward لشي بوست من القناة.\nمثال: https://t.me/shopname")
@@ -1505,23 +1829,28 @@ def handle_message(state, msg):
         send(cid, f"🔑 الكلمات دابا: {cur}\n\nصيفط الكلمات الجداد مفرقين بفاصلة\n"
                   "مثال: nike, iphone, parfum\nولا صيفط 0 باش تخويهم وتوصلك كل البوستات")
     elif text in (BTN_STATUS, "/status"):
-        send(cid, status_text(state), KEYBOARD)
+        send(cid, status_text(state))
+    elif text in (BTN_LAST, "/last"):
+        show_last_check(cid)
+    elif text == BTN_TOGGLE:
+        state["paused"] = not state.get("paused")
+        save_state(state)
+        send(cid, "⏸ وقفت التتبع. ضغط «⏯ وقف/شغل» باش نرجع." if state["paused"] else "▶️ رجعت نتبع القنوات.")
     elif text == BTN_PAUSE:
         state["paused"] = True
-        send(cid, "⏸ وقفت التتبع. ضغط " + BTN_RESUME + " باش نرجع.", KEYBOARD)
+        send(cid, "⏸ وقفت التتبع. ضغط «⏯ وقف/شغل» باش نرجع.")
     elif text == BTN_RESUME:
         state["paused"] = False
-        send(cid, "▶️ رجعت نتبع القنوات.", KEYBOARD)
+        send(cid, "▶️ رجعت نتبع القنوات.")
     elif text == BTN_MODE:
         save_settings({"PHOTOS_ONLY": not PHOTOS_ONLY})
         note = "\n\n(هادا الوضع العادي. باش تبدل غير قناة وحدة، سير لـ 📋 القنوات)"
         if PHOTOS_ONLY:
             send(cid, "🖼 دابا: غير التصاور\nكنصيفط ليك البوست اللي فيه تصويرة ديريكت، "
-                      "والبوستات اللي فيهم غير النص كندوزهم." + note, KEYBOARD)
+                      "والبوستات اللي فيهم غير النص كندوزهم." + note)
         else:
             send(cid, "📝 دابا: مع النص\nإلا جات التصويرة بوحدها، كنتسنى النص اللي موراها "
-                      f"({TEXT_WAIT // 60} دقايق) ونجمعهم. والبوستات ديال النص بوحدو كيوصلوك حتى هوما." + note,
-                 KEYBOARD)
+                      f"({TEXT_WAIT // 60} دقايق) ونجمعهم. والبوستات ديال النص بوحدو كيوصلوك حتى هوما." + note)
     elif text == BTN_TEST:
         send(cid, "🔔 هادا ميساج تجريبي من البوت. إلا وصلك، تيليجرام خدام.")
         if NTFY_TOPIC:
@@ -1542,23 +1871,23 @@ def handle_message(state, msg):
         uname = fwd_chat.get("username")
         if mode == "add":
             send(cid, add_channels(state, [uname]) if uname else
-                 "❌ هاد القناة خاصة (ما عندهاش رابط عام)، ما كنقدرش نتبعها.", KEYBOARD)
+                 "❌ هاد القناة خاصة (ما عندهاش رابط عام)، ما كنقدرش نتبعها.")
         elif uname and fwd_id:
             offer_post(cid, uname, int(fwd_id))
         elif _photo_from_message(msg):
             report_for(state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
         else:
-            send(cid, "❌ هاد القناة خاصة وما فيهاش تصويرة نحللها.", KEYBOARD)
+            send(cid, "❌ هاد القناة خاصة وما فيهاش تصويرة نحللها.")
     elif mode == "add":
         names, bad = parse_channels(text)
-        send(cid, add_channels(state, names, bad), KEYBOARD)
+        send(cid, add_channels(state, names, bad))
     elif mode == "kw":
         if text in ("0", "مسح", "حيد"):
             new = []
         else:
             new = [k.strip() for k in re.split(r"[,،\n]+", text) if k.strip()]
         save_settings({"KEYWORDS": new})
-        send(cid, "✅ تبدلو الكلمات: " + (", ".join(new) if new else "كل بوست جديد"), KEYBOARD)
+        send(cid, "✅ تبدلو الكلمات: " + (", ".join(new) if new else "كل بوست جديد"))
     elif _photo_from_message(msg):
         report_for(state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
     elif post_link:
@@ -1739,14 +2068,31 @@ def main():
     if not state.get("hello_sent"):
         hello = f"✅ السكريبت خدام. كنتبع {len(CHANNELS)} قناة." + \
             ("" if CHANNELS else f"\nضغط {BTN_ADD} باش تزيد القنوات ديال الموردين.")
-        broadcast(state, hello, KEYBOARD)
+        broadcast(state, hello)
         send_ntfy("✅ خدام", hello, priority=3)
         state["hello_sent"] = True
+        save_state(state)
+    try:
+        bot_api("setMyCommands", {"commands": json.dumps([
+            {"command": "menu", "description": "الأزرار"}, {"command": "status", "description": "الحالة"},
+            {"command": "last", "description": "آخر تحقق ديال Gemini"}])})
+    except Exception as e:
+        log(f"setMyCommands failed: {e}")
+    if not state.get("gemini_button_sent"):
+        broadcast(state, f"🆕 زر جديد «{BTN_LAST}»: كيوريك آخر منتوج تحقق منو Gemini: "
+                         "التصويرة ديال المورد، الكولاج، والجواب ديالو.", KEYBOARD)
+        state["gemini_button_sent"] = True
+        state["small_keyboard_sent"] = True
+        save_state(state)
+    if not state.get("small_keyboard_sent"):
+        broadcast(state, "⌨️ الأزرار ولاو صغار ومخبيين باش يبان كلشي. كتحلهم بالزر ⌨️ حدا خانة الكتبة "
+                         "(ولا صيفط /menu).", KEYBOARD)
+        state["small_keyboard_sent"] = True
         save_state(state)
     if not state.get("inbox_hello_sent"):
         broadcast(state, "🆕 جديد: كل منتوج جديد كيمشي بوحدو لـ «📥 الوارد» فالـ CMS ديال المتجر، "
                          "على شكل بطاقة (سمية من Google، ثمن مقترح، تصنيف). تما كتقرر واش تزيدو.\n"
-                         + ("" if (SHOP_URL and SHOP_TOKEN) else f"باش يخدم، ضغط «{BTN_SHOP}» مرة وحدة."), KEYBOARD)
+                         + ("" if (SHOP_URL and SHOP_TOKEN) else f"باش يخدم، ضغط «{BTN_SHOP}» مرة وحدة."))
         state["inbox_hello_sent"] = True
         save_state(state)
 

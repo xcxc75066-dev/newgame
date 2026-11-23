@@ -1626,7 +1626,7 @@
     } catch (error) { toast(error.message, 'error'); return; }
     const scope = $('bannerScope');
     const current = scope.value || 'home';
-    scope.replaceChildren(h('option', { value: 'home', text: '🏠 الرئيسية' }),
+    scope.replaceChildren(h('option', { value: 'home', text: '🏠 كل الأصناف (الافتراضي)' }),
       ...state.categories.map((c) => h('option', { value: c.id, text: `📂 ${c.title}` })));
     scope.value = [...scope.options].some((o) => o.value === current) ? current : 'home';
     renderBanners();
@@ -1642,8 +1642,8 @@
     const list = $('bannerList');
     if (!slides.length) {
       list.replaceChildren(h('p', { class: 'hint', text: scope === 'home'
-        ? (state.bannersWereSet ? 'ما كاين حتى صورة: البانر ما غاديش يبان فالرئيسية.' : 'مازال ما زدتي والو: كيبانو الصور القدام ديال الموقع (السماعات) حتى تزيد ديالك وتحفظ.')
-        : 'ما كاين حتى صورة لهاد التصنيف: كيبانو صور الرئيسية.' }));
+        ? (state.bannersWereSet ? 'ما كاين حتى صورة: الأصناف اللي ما عندهومش صور ديالهم ما غاديش يبان فيهم البانر.' : 'مازال ما زدتي والو: كيبانو الصور القدام ديال الموقع (السماعات) حتى تزيد ديالك وتحفظ.')
+        : 'ما كاين حتى صورة لهاد التصنيف: كيبانو صور «كل الأصناف».' }));
       return;
     }
     list.replaceChildren(...slides.map((slide, index) => {
@@ -1683,7 +1683,7 @@
     const scope = $('bannerScope').value || 'home';
     const slides = state.banners[scope] || [];
     if (scope === 'home' && !slides.length
-        && !confirm('ما كاين حتى صورة فالبانر ديال الرئيسية.\nإلا حفظتي، البانر غادي يختفي من المتجر. نكملو؟')) return;
+        && !confirm('ما كاين حتى صورة فـ«كل الأصناف».\nإلا حفظتي، البانر غادي يختفي من الأصناف اللي ما عندهومش صور ديالهم. نكملو؟')) return;
     try {
       const clean = {};
       Object.entries(state.banners).forEach(([key, list]) => { if (list.length || key === 'home') clean[key] = list; });

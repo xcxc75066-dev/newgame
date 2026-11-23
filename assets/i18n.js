@@ -134,9 +134,27 @@
   setTimeout(function () { html.classList.remove('i18n-pending'); }, 1500); // never stay hidden
 
   var products = {}; // product texts from the server
-  var ownWrites = new WeakMap();
+  var ownWrites = new WeakMap(); // text node -> what we wrote and when
+  var generation = 0; // goes up when the product texts arrive: look again
 
-  function norm(text) { return String(text || '').replace(/\s+/g, ' ').trim(); }
+  // In Arabic, Latin words and numbers inside product names keep their order
+  // ("6-25MM²" was shown "25MM²-6"): each run is wrapped in invisible
+  // left-to-right marks (U+2066 ... U+2069), and never cut at its "-" or "/"
+  // (U+2060 after them).
+  var BIDI_PLACES = '.product-title, .qm-title, .qm-description, .cart-item-title';
+  var ISOLATES = /[\u2060\u2066-\u2069]/g;
+  var LTR_RUN = /[A-Za-z0-9\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F²³°%+\-–\/.,:×*'’ ]*[A-Za-z0-9\u00C0-\u024F²³°%]/g;
+  function isolate(text) {
+    return text.replace(LTR_RUN, function (run) {
+      return /[A-Za-z\u00C0-\u024F]|\d\D+\d/.test(run) ? '\u2066' + run.replace(/[\-–\/]/g, '$&\u2060') + '\u2069' : run;
+    });
+  }
+  function wantsIsolates(node) {
+    var el = node.parentElement;
+    return lang === 'ar' && !!el && !!el.closest && !!el.closest(BIDI_PLACES);
+  }
+
+  function norm(text) { return String(text || '').replace(ISOLATES, '').replace(/\s+/g, ' ').trim(); }
 
   function translateText(source) {
     var key = norm(source);
@@ -163,13 +181,14 @@
   }
 
   function doText(node) {
-    if (ownWrites.get(node) === node.data || skip(node)) return;
-    var result = translateText(node.data);
-    if (result === null || result === node.data) return;
-    var lead = node.data.match(/^\s*/)[0];
-    var tail = node.data.match(/\s*$/)[0];
-    node.data = lead + result + tail;
-    ownWrites.set(node, node.data);
+    var mark = ownWrites.get(node);
+    if ((mark && mark.data === node.data && mark.generation === generation) || skip(node)) return;
+    var data = node.data.replace(ISOLATES, '');
+    var result = translateText(data);
+    var next = result === null ? data : data.match(/^\s*/)[0] + result + data.match(/\s*$/)[0];
+    if (wantsIsolates(node)) next = isolate(next);
+    if (next !== node.data) node.data = next;
+    ownWrites.set(node, { data: node.data, generation: generation });
   }
 
   var ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
@@ -279,7 +298,7 @@
       .then(function (response) { return response.ok ? response.json() : {}; })
       .then(function (data) {
         products = (data && data.texts) || {};
-        if (Object.keys(products).length) walk(document.body);
+        if (Object.keys(products).length) { generation += 1; walk(document.body); }
       })
       .catch(function () { /* products stay in their language */ });
   }

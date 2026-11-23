@@ -4,7 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="google" content="notranslate">
     <!-- Languages: Arabic by default, French, English (no Google Translate) -->
-    <script src="/assets/i18n.js"></script>
+    <script src="/assets/i18n.js?v=3"></script>
     <title>Amani Market - Entertainment Products</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <meta name="theme-color" content="#0A3A2A">
@@ -79,7 +79,8 @@
         /* badges like "-20%" keep their order in Arabic */
         html[dir="rtl"] .product-badge-cms { direction: ltr; unicode-bidi: isolate; }
         /* the scrolling announcement keeps moving the same way in Arabic */
-        html[dir="rtl"] .announcement-track { direction: ltr; }
+        html[dir="rtl"] .announcement-bar,
+        html[dir="rtl"] .announcement-track { direction: ltr; } /* the bar too, or the text runs out and leaves it empty */
         html[dir="rtl"] .announcement-track > span { direction: rtl; unicode-bidi: isolate; }
 
         :root {

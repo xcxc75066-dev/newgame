@@ -2620,22 +2620,7 @@
                 this.track = container.querySelector('.hp-slider-track');
                 this.slides = container.querySelectorAll('.hp-slide');
 
-        // --- بداية التعديل الأوتوماتيكي: بناء النقاط حسب عدد الـ CMS ---
-        const dContainer = this.container ? this.container.querySelector('.hp-dots-container') : null;
-        if (dContainer && this.slides) {
-            dContainer.innerHTML = ''; // مسح النقاط الثابتة
-            for (let i = 0; i < this.slides.length; i++) {
-                const dot = document.createElement('span');
-                dot.className = i === 0 ? 'hp-dot active' : 'hp-dot';
-                dot.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    if (typeof this.goTo === 'function') this.goTo(i);
-                });
-                dContainer.appendChild(dot);
-            }
-        }
-        // --- نهاية التعديل الأوتوماتيكي ---
-        this.dots = container.querySelectorAll('.hp-dots-container .hp-dot');
+                this.buildDots();
                 this.prevBtn = container.querySelector('.hp-nav-arrow.prev');
                 this.nextBtn = container.querySelector('.hp-nav-arrow.next');
 
@@ -2665,6 +2650,36 @@
                 }, BANNER_AUTO_MS);
             }
 
+            // One dot per picture (the pictures come from the CMS).
+            buildDots() {
+                const dContainer = this.container.querySelector('.hp-dots-container');
+                if (dContainer) {
+                    dContainer.innerHTML = '';
+                    for (let i = 0; i < this.slides.length; i++) {
+                        const dot = document.createElement('span');
+                        dot.className = i === 0 ? 'hp-dot active' : 'hp-dot';
+                        dot.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.goTo(i);
+                        });
+                        dContainer.appendChild(dot);
+                    }
+                }
+                this.dots = this.container.querySelectorAll('.hp-dots-container .hp-dot');
+            }
+
+            // The pictures changed (another category): start again at the first.
+            refresh() {
+                this.slides = this.container.querySelectorAll('.hp-slide');
+                this.totalSlides = this.slides.length;
+                this.buildDots();
+                this.track.style.transition = 'none';
+                this.currentIndex = 0;
+                this.prevTranslate = this.currentTranslate = 0;
+                this.track.style.transform = 'translateX(0%)';
+                this.scheduleAuto();
+            }
+
             init() {
                 this.container.addEventListener('click', (e) => {
                     if (!this.hasDragged) {
@@ -2685,13 +2700,6 @@
                         this.goTo(this.currentIndex + 1);
                     });
                 }
-
-                this.dots.forEach((dot, idx) => {
-                    dot.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.goTo(idx);
-                    });
-                });
 
                 const c = this.container;
                 c.addEventListener('touchstart', (e) => this.dragStart(e), { passive: true });
@@ -2783,51 +2791,66 @@
         // own pictures, else the home ones. Never set in the CMS: the built-in
         // pictures stay. Set but empty: no banner.
         let bannerSlider = null;
-        async function initBannerSlider() {
+        // The banner of the category on screen: its own pictures, else those of
+        // "every category" (home). Never set in the CMS: the built-in pictures
+        // stay. Set but empty: no banner. It changes with the category.
+        let bannerData = null;
+        let bannerShownKey = null;
+        let bannerWanted = { categoryId: '', visible: true };
+        (function () {
+            const match = window.location.pathname.match(/^\/c\/([^/]+)\/?$/i);
+            if (match) { try { bannerWanted.categoryId = decodeURIComponent(match[1]); } catch (_) { bannerWanted.categoryId = match[1]; } }
+        })();
+
+        function applyBanner() {
             const container = document.getElementById('headphonesSlider');
             const wrapper = document.querySelector('.headphones-slider-wrapper');
+            if (!container || !wrapper) return;
+            if (bannerData) {
+                const id = bannerWanted.categoryId;
+                const own = id && Array.isArray(bannerData[id]) ? bannerData[id] : [];
+                const slides = own.length ? own : (Array.isArray(bannerData.home) ? bannerData.home : []);
+                const key = own.length ? `c:${id}` : 'home';
+                if (key !== bannerShownKey) {
+                    bannerShownKey = key;
+                    const track = container.querySelector('.hp-slider-track');
+                    track.replaceChildren(...slides.map((slide, index) => {
+                        const holder = document.createElement('div');
+                        holder.className = 'hp-slide';
+                        const image = document.createElement('img');
+                        image.src = slide.image;
+                        image.alt = `Banner ${index + 1}`;
+                        image.loading = index ? 'lazy' : 'eager';
+                        if (slide.link) {
+                            const link = document.createElement('a');
+                            link.href = slide.link;
+                            link.addEventListener('click', (event) => {
+                                if (bannerSlider && bannerSlider.hasDragged) event.preventDefault();
+                            });
+                            link.appendChild(image);
+                            holder.appendChild(link);
+                        } else {
+                            holder.appendChild(image);
+                        }
+                        return holder;
+                    }));
+                    container.querySelectorAll('.hp-nav-arrow').forEach(arrow => { arrow.hidden = slides.length < 2; });
+                    wrapper.dataset.empty = slides.length ? '' : '1';
+                    if (bannerSlider) bannerSlider.refresh();
+                }
+            }
+            wrapper.hidden = !bannerWanted.visible || wrapper.dataset.empty === '1';
+        }
+
+        async function initBannerSlider() {
+            const container = document.getElementById('headphonesSlider');
             if (!container) return;
-            let slides = null;
             try {
                 const response = await fetch('/api/banners', { cache: 'no-store' });
                 const data = response.ok ? await response.json() : {};
-                if (data && data.banners) {
-                    const match = window.location.pathname.match(/^\/c\/([^/]+)\/?$/i);
-                    let categoryId = '';
-                    if (match) { try { categoryId = decodeURIComponent(match[1]); } catch (_) { categoryId = match[1]; } }
-                    const own = categoryId && Array.isArray(data.banners[categoryId]) ? data.banners[categoryId] : [];
-                    slides = own.length ? own : (Array.isArray(data.banners.home) ? data.banners.home : []);
-                }
-            } catch (_) { slides = null; }
-            if (slides) {
-                const track = container.querySelector('.hp-slider-track');
-                track.replaceChildren(...slides.map((slide, index) => {
-                    const holder = document.createElement('div');
-                    holder.className = 'hp-slide';
-                    const image = document.createElement('img');
-                    image.src = slide.image;
-                    image.alt = `Banner ${index + 1}`;
-                    image.loading = index ? 'lazy' : 'eager';
-                    if (slide.link) {
-                        const link = document.createElement('a');
-                        link.href = slide.link;
-                        link.addEventListener('click', (event) => {
-                            if (bannerSlider && bannerSlider.hasDragged) event.preventDefault();
-                        });
-                        link.appendChild(image);
-                        holder.appendChild(link);
-                    } else {
-                        holder.appendChild(image);
-                    }
-                    return holder;
-                }));
-                if (!slides.length && wrapper) {
-                    wrapper.dataset.empty = '1';
-                    wrapper.hidden = true;
-                }
-                const arrows = container.querySelectorAll('.hp-nav-arrow');
-                arrows.forEach(arrow => { arrow.hidden = slides.length < 2; });
-            }
+                if (data && data.banners) bannerData = data.banners;
+            } catch (_) { bannerData = null; }
+            applyBanner();
             bannerSlider = new UltraSmoothSlider(container);
         }
         initBannerSlider();
@@ -3925,7 +3948,8 @@
             if (newsSection) newsSection.hidden = validPage !== 'new';
             const categorySection = document.getElementById('categorySection');
             if (categorySection) categorySection.hidden = true;
-            if (slider) slider.hidden = !homeLike || slider.dataset.empty === '1';
+            bannerWanted = { categoryId: isCategory ? currentCategoryId : '', visible: homeLike };
+            applyBanner();
             if (back) back.hidden = isHome || isCategory; // no home page to go back to
             if (whatsNew) whatsNew.hidden = !(isHome || isLanding);
             renderCategoryTabs(isCategory ? currentCategoryId : '');

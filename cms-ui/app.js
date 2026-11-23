@@ -990,14 +990,19 @@
     state.uploadTarget = null;
     if (!file || !done) return;
     toast('جاري رفع الصورة…');
+    state.uploading = true;
+    let url = '';
     try {
       const blob = await shrinkImage(file);
       const data = await api('/upload', { method: 'POST', raw: blob, contentType: blob.type || 'image/jpeg' });
-      done(data.url);
+      url = data.url;
       toast('تم رفع الصورة ✓', 'success');
     } catch (error) {
       toast(error.message || 'تعذر رفع الصورة.', 'error');
+    } finally {
+      state.uploading = false;
     }
+    if (url) await done(url);
   });
 
   // ------------------------------------------------------- extra photos
@@ -1664,20 +1669,33 @@
     const scope = $('bannerScope').value || 'home';
     const slides = state.banners[scope] || (state.banners[scope] = []);
     if (slides.length >= 10) return toast('الحد 10 صور', 'error');
-    pickImage((url) => { slides.push({ image: url, link: '' }); renderBanners(); toast('تزادت ✓ ما تنساش «حفظ البانر»', 'success'); });
+    // The picture is saved as soon as it is uploaded: nothing is lost if the
+    // phone reloads the page or "حفظ البانر" is forgotten.
+    pickImage(async (url) => {
+      slides.push({ image: url, link: '' });
+      renderBanners();
+      await saveBanners();
+    });
   });
 
-  $('saveBannersBtn').addEventListener('click', async () => {
+  async function saveBanners() {
+    if (state.uploading) return toast('الصورة مازال كتترفع… تسنى شوية.', 'error');
+    const scope = $('bannerScope').value || 'home';
+    const slides = state.banners[scope] || [];
+    if (scope === 'home' && !slides.length
+        && !confirm('ما كاين حتى صورة فالبانر ديال الرئيسية.\nإلا حفظتي، البانر غادي يختفي من المتجر. نكملو؟')) return;
     try {
       const clean = {};
-      Object.entries(state.banners).forEach(([scope, slides]) => { if (slides.length || scope === 'home') clean[scope] = slides; });
+      Object.entries(state.banners).forEach(([key, list]) => { if (list.length || key === 'home') clean[key] = list; });
       const data = await api('/banners', { method: 'PUT', body: { banners: clean } });
       state.banners = data.banners;
       state.bannersWereSet = true;
       renderBanners();
-      toast('تحفظ البانر ✓ راه ظاهر فالمتجر', 'success');
+      const count = (state.banners[scope] || []).length;
+      toast(count ? `تحفظ البانر ✓ ${count} صورة باينة فالمتجر` : 'تحفظ: ما كاين حتى صورة فهاد البانر.', 'success');
     } catch (error) { toast(error.message, 'error'); }
-  });
+  }
+  $('saveBannersBtn').addEventListener('click', saveBanners);
 
   function renderCategoriesTab() {
     const container = $('categoryList');

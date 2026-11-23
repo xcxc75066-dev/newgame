@@ -643,6 +643,43 @@
             white-space: nowrap;
         }
 
+        /* "More" next to a section title and "Show more" under its products:
+           light text, no background. */
+        .section-more-link,
+        .section-more-btn {
+            border: 0;
+            background: transparent;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .section-more-link {
+            margin-inline-start: auto;
+            padding: 6px 0 6px 12px;
+            color: var(--gold-accent);
+            font-size: 0.95rem;
+        }
+        .section-more-bottom {
+            display: flex;
+            justify-content: center;
+            margin: 18px 0 8px;
+        }
+        .section-more-bottom[hidden],
+        .section-more-link[hidden] { display: none; }
+        .section-more-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            color: var(--primary-green);
+            font-size: 0.95rem;
+        }
+        .section-more-btn i { font-size: 0.75rem; }
+        .section-more-link:hover,
+        .section-more-btn:hover { text-decoration: underline; }
+        body.dark-mode .section-more-btn { color: var(--gold-accent); }
+
         .catalog-text-view-more-btn:hover {
             background: transparent;
             color: var(--primary-green);
@@ -2487,10 +2524,14 @@
             <div class="catalog-view-more-wrap" id="popularViewMoreWrap">
                 <button type="button" class="catalog-view-more-btn catalog-text-view-more-btn" id="popularViewMoreBtn">VIEW MORE</button>
             </div>
+            <button type="button" class="section-more-link" data-more="popular" hidden>More</button>
         </div>
 
         <div class="products-grid" id="productsGrid">
             <!-- Product cards are loaded dynamically from products-json/. -->
+        </div>
+        <div class="section-more-bottom" data-more-wrap="popular" hidden>
+            <button type="button" class="section-more-btn" data-more="popular">Show more <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
         </div>
 
         <section class="news-section category-section" id="categorySection" hidden="">
@@ -2531,11 +2572,16 @@
                 <div class="catalog-view-more-wrap" id="offersViewMoreWrap">
                     <button type="button" class="catalog-view-more-btn" id="offersViewMoreBtn">VIEW MORE</button>
                 </div>
+                <button type="button" class="section-more-link" data-more="offers" hidden>More</button>
             </div>
             <div class="best-offers-grid" id="bestOffersGrid">
                 <!-- Product cards are loaded dynamically from products-json/. -->
 
-        </div></section>
+        </div>
+            <div class="section-more-bottom" data-more-wrap="offers" hidden>
+                <button type="button" class="section-more-btn" data-more="offers">Show more <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+            </div>
+        </section>
 
         <!-- Loop Arrow & See What's New CTA -->
         <div class="whats-new-container" id="whatsNewContainer">
@@ -2566,6 +2612,7 @@
             }
         });
 
+        const BANNER_AUTO_MS = 5000;
         class UltraSmoothSlider {
             constructor(container) {
                 if(!container) return;
@@ -2603,6 +2650,19 @@
                 this.hasDragged = false;
 
                 this.init();
+                this.scheduleAuto();
+            }
+
+            // The pictures turn by themselves every few seconds (the site looks
+            // alive); a swipe, an arrow or a dot restarts the wait.
+            scheduleAuto() {
+                clearTimeout(this.autoTimer);
+                if (this.totalSlides < 2) return;
+                if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+                this.autoTimer = setTimeout(() => {
+                    if (document.hidden || this.isDragging) this.scheduleAuto();
+                    else this.goTo((this.currentIndex + 1) % this.totalSlides);
+                }, BANNER_AUTO_MS);
             }
 
             init() {
@@ -2709,6 +2769,7 @@
                 this.track.style.transform = `translateX(${-this.currentIndex * 100}%)`;
 
                 this.updateDots();
+                this.scheduleAuto();
             }
 
             updateDots() {
@@ -3772,9 +3833,12 @@
             );
         }
 
+        // Best Offers: the product that saves the most DH comes first; the same
+        // saving: the one visitors click most.
         function sortOfferProducts(products) {
             return [...products].sort((first, second) =>
-                Number(second.clickCount || 0) - Number(first.clickCount || 0)
+                productSaving(second) - productSaving(first)
+                || Number(second.clickCount || 0) - Number(first.clickCount || 0)
                 || productDiscount(second) - productDiscount(first)
                 || jsonSourceNumber(second.sourceFile) - jsonSourceNumber(first.sourceFile)
                 || Number(first.order) - Number(second.order)
@@ -3852,6 +3916,7 @@
             const isCategory = validPage === 'category';
             const homeLike = isHome || isCategory; // a category page looks like the home page
             applyCatalogScope(isCategory ? currentCategoryId : '');
+            if (!isCategory) hideMoreControls();
             popularHeader.hidden = !homeLike && !isPopular;
             productsGrid.hidden = !homeLike && !isPopular;
             relatedSection.hidden = !homeLike && validPage !== 'related';
@@ -3878,8 +3943,10 @@
                 renderJsonSection('related', 0, false);
                 renderJsonSection('offers', 0, false);
             } else if (isCategory) {
-                // every product of the category, then related and offers
-                productsGrid.replaceChildren(...jsonCatalog.popular.map(productCardFromJson));
+                // the category's products (a few, then "Show more"), related and offers
+                const moreKey = currentCategoryId;
+                if (moreState.key !== moreKey) { moreState.key = moreKey; moreState.shown = {}; }
+                renderMoreSection('popular');
                 if (!jsonCatalog.popular.length) {
                     const empty = document.createElement('p');
                     empty.className = 'catalog-empty-message';
@@ -3887,7 +3954,7 @@
                     productsGrid.replaceChildren(empty);
                 }
                 renderJsonSection('related', 0, false);
-                renderJsonSection('offers', 0, false);
+                renderMoreSection('offers');
                 ['popularViewMoreWrap', 'relatedViewMoreWrap', 'offersViewMoreWrap'].forEach(id => {
                     const wrap = document.getElementById(id);
                     if (wrap) wrap.hidden = true;
@@ -3943,8 +4010,43 @@
             const inCategory = jsonCatalog.all.filter(product => product.categories.includes(categoryId));
             jsonCatalog.popular = sortJsonProducts(inCategory);
             jsonCatalog.related = relatedByTypes(inCategory, jsonCatalog.all, home.related);
-            jsonCatalog.offers = home.offers.filter(product => product.categories.includes(categoryId));
+            // Best Offers always compares the products of every category.
+            jsonCatalog.offers = home.offers;
         }
+
+        // A category page shows its products a few at a time: "More" (next to
+        // the title) and "Show more" (under the products) add the next ones.
+        const SECTION_STEP = 8;
+        const moreState = { key: '', shown: {} };
+
+        function renderMoreSection(name, append = false) {
+            const grid = document.getElementById(name === 'popular' ? 'productsGrid' : 'bestOffersGrid');
+            if (!grid) return;
+            const list = name === 'popular' ? jsonCatalog.popular : sortOfferProducts(jsonCatalog.offers);
+            const shown = Math.min(moreState.shown[name] || SECTION_STEP, list.length);
+            if (append) {
+                const have = grid.querySelectorAll(':scope > .product-card').length;
+                grid.append(...list.slice(have, shown).map(productCardFromJson));
+            } else {
+                grid.replaceChildren(...list.slice(0, shown).map(productCardFromJson));
+            }
+            const more = list.length > shown;
+            document.querySelectorAll(`.section-more-link[data-more="${name}"], [data-more-wrap="${name}"]`)
+                .forEach(element => { element.hidden = !more; });
+        }
+
+        function hideMoreControls() {
+            document.querySelectorAll('.section-more-link, .section-more-bottom')
+                .forEach(element => { element.hidden = true; });
+        }
+
+        document.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-more]');
+            if (!button) return;
+            const name = button.dataset.more;
+            moreState.shown[name] = (moreState.shown[name] || SECTION_STEP) + SECTION_STEP;
+            renderMoreSection(name, true);
+        });
 
         function renderCategoryPage() {
             const category = shopCategories.find(c => c.id === currentCategoryId);

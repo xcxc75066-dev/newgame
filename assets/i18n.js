@@ -51,6 +51,8 @@
     'BACK': ['رجوع', 'RETOUR'],
     'OUR POPULAR PRODUCTS': ['منتجاتنا الأكثر طلباً', 'NOS PRODUITS POPULAIRES'],
     'VIEW MORE': ['عرض المزيد', 'VOIR PLUS'],
+    'More': ['المزيد', 'Plus'],
+    'Show more': ['عرض المزيد', 'Voir plus'],
     'CATEGORY': ['الفئة', 'CATÉGORIE'],
     'Category': ['الفئة', 'Catégorie'],
     'NEWS': ['الجديد', 'NOUVEAUTÉS'],

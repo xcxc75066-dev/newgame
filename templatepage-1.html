@@ -15,37 +15,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
 
     <style>
-        /* Category bar */
-        .category-tabs {
-            display: flex;
-            gap: 8px;
-            overflow-x: auto;
-            padding: 4px 2px 14px;
-            margin-bottom: 6px;
-            scrollbar-width: none;
-            -webkit-overflow-scrolling: touch;
-        }
-        .category-tabs::-webkit-scrollbar { display: none; }
-        .category-tabs[hidden] { display: none; }
-        .category-tab {
-            flex: 0 0 auto;
-            padding: 9px 18px;
-            border-radius: 999px;
-            border: 1.5px solid var(--border-color);
-            background: var(--card-bg);
-            color: var(--text-dark);
-            font-weight: 600;
-            font-size: 0.92rem;
-            text-decoration: none;
-            white-space: nowrap;
-            transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-        }
-        .category-tab.active {
-            background: var(--primary-green);
-            border-color: var(--primary-green);
-            color: #ffffff;
-            box-shadow: 0 4px 12px rgba(10, 58, 42, 0.25);
-        }
+        /* The category the visitor is in, highlighted in the side menu */
+        .nav-links .submenu a.active { color: #ffffff; }
 
         /* Languages (assets/i18n.js) */
         html.i18n-pending body { visibility: hidden; }
@@ -2481,8 +2452,6 @@
     <!-- Main Container -->
     <main class="container">
 
-        <!-- Categories: the one the visitor is in is highlighted -->
-        <nav class="category-tabs" id="categoryTabs" aria-label="Categories" hidden></nav>
         <div class="catalog-back-container" id="catalogBackContainer" hidden="">
             <button type="button" class="catalog-back-btn" id="catalogBackBtn">
                 <i class="fa-solid fa-arrow-left"></i> BACK
@@ -2982,22 +2951,19 @@
             }];
         }
 
-        // Category bar on top of the shop: the current category is highlighted.
+        // The category the visitor is in is highlighted in the side menu.
         function renderCategoryTabs(activeId) {
-            const bar = document.getElementById('categoryTabs');
-            if (!bar) return;
             const active = activeId || currentCategoryId || (shopCategories[0] && shopCategories[0].id) || '';
-            bar.hidden = !shopCategories.length;
-            bar.replaceChildren(...shopCategories.map(category => {
-                const link = document.createElement('a');
-                link.className = `category-tab${category.id === active ? ' active' : ''}`;
-                link.href = `/c/${encodeURIComponent(category.id)}`;
-                link.textContent = category.title;
-                if (category.id === active) link.setAttribute('aria-current', 'page');
-                return link;
-            }));
-            const current = bar.querySelector('.category-tab.active');
-            if (current && current.scrollIntoView) current.scrollIntoView({ block: 'nearest', inline: 'center' });
+            document.querySelectorAll('#navLinksContainer [data-category-id]').forEach(link => {
+                const isActive = link.dataset.categoryId === active;
+                link.classList.toggle('active', isActive);
+                if (isActive) {
+                    link.setAttribute('aria-current', 'page');
+                    link.closest('li.nav-item')?.classList.add('open');
+                } else {
+                    link.removeAttribute('aria-current');
+                }
+            });
         }
 
         function openCategoryPage(categoryId) {
@@ -3085,6 +3051,7 @@
                             const subPage = getCatalogPageFromUrl(sub.url);
                             subA.href = subPage ? `#${subPage}` : (sub.url || '#');
                             subA.textContent = sub.title;
+                            if (sub.categoryId) subA.dataset.categoryId = sub.categoryId;
                             const subBackground = sub.bgColor || sub.backgroundColor || '';
                             const subTextColor = sub.color || sub.textColor || '';
                             const subActiveColor = sub.activeColor

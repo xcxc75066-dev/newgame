@@ -886,6 +886,16 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
 
     def _send_file(self, path: Path, content_type: str, cache_control: str) -> None:
         try:
+            info = path.stat()
+            # "no-cache" files are checked on every visit; unchanged ones answer
+            # "304 Not Modified" (a few bytes) instead of being sent again.
+            etag = f'"{info.st_mtime_ns:x}-{info.st_size:x}"'
+            if cache_control == "no-cache" and self.headers.get("If-None-Match") == etag:
+                self.send_response(HTTPStatus.NOT_MODIFIED)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", cache_control)
+                self.end_headers()
+                return
             body = path.read_bytes()
         except OSError:
             LOGGER.exception("Error reading file %s", path)
@@ -895,6 +905,8 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache_control)
+        if cache_control == "no-cache":
+            self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self._write_body(body)
@@ -1455,8 +1467,10 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
         public_file = self._public_file(req_path_name)
         if public_file is not None:
             content_type = STATIC_CONTENT_TYPES[public_file.suffix.lower()]
-            # JSON product files change when the shop is edited: always revalidate them.
-            cache = "no-cache" if public_file.suffix.lower() in {".json", ".html"} else "public, max-age=86400"
+            # Product files change when the shop is edited, and scripts/styles with
+            # each update: always check them (a quick "304" when unchanged), so a
+            # phone never keeps an old version. Photos and fonts are kept a day.
+            cache = "no-cache" if public_file.suffix.lower() in {".json", ".html", ".js", ".css"} else "public, max-age=86400"
             self._send_file(public_file, content_type, cache)
             return
         # ---------------------------------------------------------

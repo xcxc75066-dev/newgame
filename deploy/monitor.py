@@ -138,9 +138,10 @@ STARTED_AT = time.time()
 # Small keyboard: 2 rows, hidden by default (open it with the ⌨️ button next to the text box).
 BTN_LIST, BTN_ADD, BTN_KW, BTN_STATUS = "📋 القنوات", "➕ قناة", "🔑 كلمات", "📊 الحالة"
 BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST = "⏯ وقف/شغل", "🔄 الوضع", "🛒 المتجر", "🔔 تجربة"
+BTN_LAST = "🔍 Gemini"  # what Gemini saw and answered for the last product
 BTN_PAUSE, BTN_RESUME = "⏸ وقف", "▶️ شغل"  # old buttons, still understood
 KEYBOARD = json.dumps({"keyboard": [[BTN_LIST, BTN_ADD, BTN_KW, BTN_STATUS],
-                                    [BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST]],
+                                    [BTN_TOGGLE, BTN_MODE, BTN_SHOP, BTN_TEST, BTN_LAST]],
                        "resize_keyboard": True, "one_time_keyboard": True, "is_persistent": False,
                        "input_field_placeholder": "⌨️ = الأزرار"})
 # the texts of the old, bigger keyboard (people may still press them)
@@ -1069,14 +1070,67 @@ def _ask_gemini(parts):
     data = _gemini(body)
     text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
     answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
-    return {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
+    verdicts = {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
+    return verdicts, text
 
 
 def _inline(data):
     return {"inline_data": {"mime_type": _mime(data), "data": base64.b64encode(data).decode()}}
 
 
-def verify_morocco(results, photo_url, photo_bytes):
+LAST_DIR = os.path.join(HERE, "last_check")
+
+
+def save_last_check(label, mine, collage, raw, pictures, mode):
+    """Keeps what Gemini saw and answered for the LAST product (button 🔍 Gemini)."""
+    try:
+        os.makedirs(LAST_DIR, exist_ok=True)
+        with open(os.path.join(LAST_DIR, "supplier.img"), "wb") as f:
+            f.write(mine)
+        collage_path = os.path.join(LAST_DIR, "collage.jpg")
+        if collage:
+            with open(collage_path, "wb") as f:
+                f.write(collage)
+        elif os.path.exists(collage_path):
+            os.remove(collage_path)
+        items = [{"n": i, "site": classify(r)[1], "rank": r.get("pos"), "title": (r.get("title") or "")[:80],
+                  "link": r.get("link", ""), "verdict": r.get("match", "")} for i, (r, _) in enumerate(pictures, 1)]
+        _save_json(os.path.join(LAST_DIR, "info.json"),
+                   {"time": time.strftime("%Y-%m-%d %H:%M"), "label": label, "mode": mode, "raw": raw[:3500],
+                    "items": items})
+    except Exception as e:
+        log(f"save last check failed: {e}")
+
+
+def show_last_check(cid):
+    info = _load_json(os.path.join(LAST_DIR, "info.json"))
+    if not info:
+        send(cid, "ما كاين حتى تحقق ديال Gemini مازال. تسنى أول منتوج جديد.")
+        return
+    try:
+        with open(os.path.join(LAST_DIR, "supplier.img"), "rb") as f:
+            bot_upload("sendPhoto", {"chat_id": cid, "caption": f"1️⃣ التصويرة ديال المورد — {info.get('label', '')}"},
+                       {"photo": ("supplier.jpg", f.read())})
+        collage_path = os.path.join(LAST_DIR, "collage.jpg")
+        if os.path.exists(collage_path):
+            with open(collage_path, "rb") as f:
+                bot_upload("sendPhoto", {"chat_id": cid,
+                                         "caption": f"2️⃣ الكولاج اللي شاف Gemini ({len(info.get('items', []))} نتيجة مغربية)"},
+                           {"photo": ("collage.jpg", f.read())})
+        else:
+            send(cid, "2️⃣ بلا كولاج: التصاور تصيفطو واحدة بواحدة (Pillow ما مثبتش: apt-get install -y python3-pil)")
+    except Exception as e:
+        log(f"show last check: {e}")
+    icon = {"same": "✅", "similar": "🟡", "different": "❌", "unchecked": "❔"}
+    lines = [f"3️⃣ الجواب ديال Gemini ({info.get('time', '')}):"]
+    for item in info.get("items", []):
+        lines.append(f"{item['n']}. {icon.get(item['verdict'], '❔')} {item['verdict'] or '—'} · {item['site']} "
+                     f"(رتبة {item['rank']}) — {item['title'][:45]}")
+    lines += ["", "الجواب كيفما جا من Gemini:", info.get("raw", "")[:1500]]
+    send(cid, "\n".join(lines))
+
+
+def verify_morocco(results, photo_url, photo_bytes, label=""):
     """Gemini compares the supplier photo with the picture of every Moroccan result
     and marks each one "same" / "similar" / "different" (in place).
     All the Moroccan pictures go in ONE numbered collage (few tokens). Results that
@@ -1105,20 +1159,22 @@ def verify_morocco(results, photo_url, photo_bytes):
             pictures.append((r, data))
     if not pictures:
         return False  # nothing could be looked at: keep the old way of counting
-    verdicts = {}
+    verdicts, raw = {}, ""
     if pictures:
         collage = make_collage([data for _, data in pictures])
         try:
             if collage:
-                verdicts = _ask_gemini([{"text": COLLAGE_PROMPT}, {"text": "Supplier product:"}, _inline(mine),
-                                        {"text": f"Collage of {len(pictures)} numbered pictures:"}, _inline(collage)])
+                verdicts, raw = _ask_gemini([{"text": COLLAGE_PROMPT}, {"text": "Supplier product:"}, _inline(mine),
+                                             {"text": f"Collage of {len(pictures)} numbered pictures:"}, _inline(collage)])
             else:  # no Pillow: one image each, 12 at a time
                 for start in range(0, len(pictures), 12):
                     chunk = pictures[start:start + 12]
                     parts = [{"text": GEMINI_PROMPT}, {"text": "Image 0 (supplier):"}, _inline(mine)]
                     for i, (_, data) in enumerate(chunk, 1):
                         parts += [{"text": f"Image {i}:"}, _inline(data)]
-                    for i, v in _ask_gemini(parts).items():
+                    chunk_verdicts, chunk_raw = _ask_gemini(parts)
+                    raw += chunk_raw + "\n"
+                    for i, v in chunk_verdicts.items():
                         verdicts[start + i] = v
         except Exception as e:
             log(f"verify: Gemini failed: {e}")
@@ -1128,6 +1184,7 @@ def verify_morocco(results, photo_url, photo_bytes):
             r["match"] = verdicts[i]
     for r in moroccan:
         r.setdefault("match", "unchecked")  # no picture, too far down, or no answer
+    save_last_check(label, mine, collage, raw, pictures, "collage" if collage else "one by one")
     same = sum(1 for r in moroccan if r["match"] == "same")
     log(f"verify: {same} same / {len(pictures)} checked / {len(moroccan)} Moroccan results"
         f"{' (collage)' if pictures and make_collage and collage else ''}")
@@ -1140,7 +1197,7 @@ def analyze_photo(state, channel, photo_url, photo_bytes, text):
     results, note = get_results(state, key, photo_url, photo_bytes)
     if results is None:
         return {"ok": False, "reason": note}
-    if verify_morocco(results, photo_url, photo_bytes):
+    if verify_morocco(results, photo_url, photo_bytes, f"@{channel}" if channel else "منتوج"):
         hit = cache()["img"].get(key)
         if hit:
             hit["results"] = results  # keep the verdicts: no second Gemini call for the same photo
@@ -1576,6 +1633,7 @@ HELP = ("⌨️ الأزرار كيتحلو بالزر ⌨️ حدا خانة ا
         f"{BTN_TOGGLE}: توقف ولا ترجع التتبع\n"
         f"{BTN_MODE}: غير البوستات اللي فيهم تصاور، ولا حتى النص\n"
         f"{BTN_TEST}: تتأكد بلي الإشعارات كيوصلو\n"
+        f"{BTN_LAST}: تشوف آخر تحقق ديال Gemini (التصويرتين + الجواب)\n"
         f"{BTN_SHOP}: تربط هاد البوت مع المتجر ديالك (مرة وحدة)\n\n"
         "🛡 ولا زيد البوت Admin فأي قناة (حتى الخاصة)، وغادي يسولك واش تقبلها\n\n"
         "📊 بغيتي تقرير على أي منتوج؟ صيفط ليا التصويرة ديالو، "
@@ -1730,6 +1788,8 @@ def handle_message(state, msg):
                   "مثال: nike, iphone, parfum\nولا صيفط 0 باش تخويهم وتوصلك كل البوستات")
     elif text in (BTN_STATUS, "/status"):
         send(cid, status_text(state))
+    elif text in (BTN_LAST, "/last"):
+        show_last_check(cid)
     elif text == BTN_TOGGLE:
         state["paused"] = not state.get("paused")
         save_state(state)
@@ -1972,9 +2032,16 @@ def main():
         save_state(state)
     try:
         bot_api("setMyCommands", {"commands": json.dumps([
-            {"command": "menu", "description": "الأزرار"}, {"command": "status", "description": "الحالة"}])})
+            {"command": "menu", "description": "الأزرار"}, {"command": "status", "description": "الحالة"},
+            {"command": "last", "description": "آخر تحقق ديال Gemini"}])})
     except Exception as e:
         log(f"setMyCommands failed: {e}")
+    if not state.get("gemini_button_sent"):
+        broadcast(state, f"🆕 زر جديد «{BTN_LAST}»: كيوريك آخر منتوج تحقق منو Gemini: "
+                         "التصويرة ديال المورد، الكولاج، والجواب ديالو.", KEYBOARD)
+        state["gemini_button_sent"] = True
+        state["small_keyboard_sent"] = True
+        save_state(state)
     if not state.get("small_keyboard_sent"):
         broadcast(state, "⌨️ الأزرار ولاو صغار ومخبيين باش يبان كلشي. كتحلهم بالزر ⌨️ حدا خانة الكتبة "
                          "(ولا صيفط /menu).", KEYBOARD)

@@ -350,15 +350,17 @@ def bot_api(method, params=None, timeout=30):
 
 
 def bot_upload(method, fields, files):
-    """multipart/form-data upload. files = {name: (filename, bytes)}"""
+    """multipart/form-data upload. files = {name: (filename, bytes)} or (filename, bytes, content type)"""
     boundary = uuid.uuid4().hex
     body = bytearray()
     for k, v in fields.items():
         body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n".encode()
         body += str(v).encode() + b"\r\n"
-    for k, (fname, data) in files.items():
+    for k, file in files.items():
+        fname, data = file[0], file[1]
+        mime = file[2] if len(file) > 2 else "image/jpeg"
         body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"; filename=\"{fname}\"\r\n"
-                 "Content-Type: image/jpeg\r\n\r\n").encode()
+                 f"Content-Type: {mime}\r\n\r\n").encode()
         body += data + b"\r\n"
     body += f"--{boundary}--\r\n".encode()
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -970,6 +972,8 @@ Images 1..N were found online. For each of them say if it shows:
 Look at details (shape, buttons, number of parts, design), not only at the type of product.
 Answer only with JSON: {"r": [{"i": 1, "v": "same"}, ...]} for every image 1..N."""
 _GEMINI_MODEL_FOUND = ""
+_GEMINI_LAST_MODEL = ""
+_GEMINI_EXCHANGES = []  # [(request body, full answer)] of the current check, for the 🔍 Gemini button
 
 
 def _mime(data):
@@ -990,6 +994,8 @@ def _gemini(body):
     headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY, "User-Agent": UA}
 
     def call(model):
+        global _GEMINI_LAST_MODEL
+        _GEMINI_LAST_MODEL = model
         req = urllib.request.Request(f"{base}/models/{model}:generateContent", data=json.dumps(body).encode(),
                                      headers=headers)
         with urllib.request.urlopen(req, timeout=90) as r:
@@ -1068,6 +1074,7 @@ def _ask_gemini(parts):
     body = {"contents": [{"role": "user", "parts": parts}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}
     data = _gemini(body)
+    _GEMINI_EXCHANGES.append((body, data, _GEMINI_LAST_MODEL))
     text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
     answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
     verdicts = {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
@@ -1095,8 +1102,33 @@ def save_last_check(label, mine, collage, raw, pictures, mode):
             os.remove(collage_path)
         items = [{"n": i, "site": classify(r)[1], "rank": r.get("pos"), "title": (r.get("title") or "")[:80],
                   "link": r.get("link", ""), "verdict": r.get("match", "")} for i, (r, _) in enumerate(pictures, 1)]
+        def readable(body, offset):
+            """The request as sent, each picture replaced by its name (the pictures come as photos)."""
+            copy = json.loads(json.dumps(body))
+            seen = 0
+            for content in copy.get("contents", []):
+                for part in content.get("parts", []):
+                    if "inline_data" not in part:
+                        continue
+                    size = len(base64.b64decode(part["inline_data"]["data"]))
+                    if seen == 0:
+                        name = "supplier.jpg"
+                    elif collage:
+                        name = "collage.jpg"
+                    else:
+                        name = f"result_{offset + seen}.jpg"
+                    part["inline_data"]["data"] = f"[صورة: {name} — {size} بايت]"
+                    seen += 1
+            return copy
+
+        exchanges = [{"model": model, "request": readable(body, n * 12), "response": answer}
+                     for n, (body, answer, model) in enumerate(_GEMINI_EXCHANGES)]
+        _save_json(os.path.join(LAST_DIR, "gemini_request.json"),
+                   {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label, "mode": mode,
+                    "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent",
+                    "exchanges": exchanges})
         _save_json(os.path.join(LAST_DIR, "info.json"),
-                   {"time": time.strftime("%Y-%m-%d %H:%M"), "label": label, "mode": mode, "raw": raw[:3500],
+                   {"time": time.strftime("%Y-%m-%d %H:%M"), "label": label, "mode": mode, "raw": raw,
                     "items": items})
     except Exception as e:
         log(f"save last check failed: {e}")
@@ -1121,12 +1153,21 @@ def show_last_check(cid):
             send(cid, "2️⃣ بلا كولاج: التصاور تصيفطو واحدة بواحدة (Pillow ما مثبتش: apt-get install -y python3-pil)")
     except Exception as e:
         log(f"show last check: {e}")
+    request_path = os.path.join(LAST_DIR, "gemini_request.json")
+    if os.path.exists(request_path):
+        try:
+            with open(request_path, "rb") as f:
+                bot_upload("sendDocument", {"chat_id": cid, "caption": "📄 الطلب كامل اللي مشى لـ Gemini (النصوص، الموديل، "
+                                            "الإعدادات) + الجواب كامل بلا قطع (مع عدد التوكنز)"},
+                           {"document": ("gemini_request.json", f.read(), "application/json")})
+        except Exception as e:
+            log(f"show last check (document): {e}")
     icon = {"same": "✅", "similar": "🟡", "different": "❌", "unchecked": "❔"}
     lines = [f"3️⃣ الجواب ديال Gemini ({info.get('time', '')}):"]
     for item in info.get("items", []):
         lines.append(f"{item['n']}. {icon.get(item['verdict'], '❔')} {item['verdict'] or '—'} · {item['site']} "
                      f"(رتبة {item['rank']}) — {item['title'][:45]}")
-    lines += ["", "الجواب كيفما جا من Gemini:", info.get("raw", "")[:1500]]
+    lines += ["", "الجواب كيفما جا من Gemini (كامل فالملف 📄):", info.get("raw", "")[:1500]]
     send(cid, "\n".join(lines))
 
 
@@ -1160,6 +1201,7 @@ def verify_morocco(results, photo_url, photo_bytes, label=""):
     if not pictures:
         return False  # nothing could be looked at: keep the old way of counting
     verdicts, raw = {}, ""
+    del _GEMINI_EXCHANGES[:]
     if pictures:
         collage = make_collage([data for _, data in pictures])
         try:

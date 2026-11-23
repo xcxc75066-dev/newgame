@@ -15,6 +15,38 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
 
     <style>
+        /* Category bar */
+        .category-tabs {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 4px 2px 14px;
+            margin-bottom: 6px;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        .category-tabs::-webkit-scrollbar { display: none; }
+        .category-tabs[hidden] { display: none; }
+        .category-tab {
+            flex: 0 0 auto;
+            padding: 9px 18px;
+            border-radius: 999px;
+            border: 1.5px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-dark);
+            font-weight: 600;
+            font-size: 0.92rem;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+        }
+        .category-tab.active {
+            background: var(--primary-green);
+            border-color: var(--primary-green);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(10, 58, 42, 0.25);
+        }
+
         /* Languages (assets/i18n.js) */
         html.i18n-pending body { visibility: hidden; }
         .lang-picker {
@@ -73,6 +105,8 @@
             unicode-bidi: isolate;
         }
         .lang-picker-title span { display: block; }
+        /* badges like "-20%" keep their order in Arabic */
+        html[dir="rtl"] .product-badge-cms { direction: ltr; unicode-bidi: isolate; }
         /* the scrolling announcement keeps moving the same way in Arabic */
         html[dir="rtl"] .announcement-track { direction: ltr; }
         html[dir="rtl"] .announcement-track > span { direction: rtl; unicode-bidi: isolate; }
@@ -2447,6 +2481,8 @@
     <!-- Main Container -->
     <main class="container">
 
+        <!-- Categories: the one the visitor is in is highlighted -->
+        <nav class="category-tabs" id="categoryTabs" aria-label="Categories" hidden></nav>
         <div class="catalog-back-container" id="catalogBackContainer" hidden="">
             <button type="button" class="catalog-back-btn" id="catalogBackBtn">
                 <i class="fa-solid fa-arrow-left"></i> BACK
@@ -2946,6 +2982,24 @@
             }];
         }
 
+        // Category bar on top of the shop: the current category is highlighted.
+        function renderCategoryTabs(activeId) {
+            const bar = document.getElementById('categoryTabs');
+            if (!bar) return;
+            const active = activeId || currentCategoryId || (shopCategories[0] && shopCategories[0].id) || '';
+            bar.hidden = !shopCategories.length;
+            bar.replaceChildren(...shopCategories.map(category => {
+                const link = document.createElement('a');
+                link.className = `category-tab${category.id === active ? ' active' : ''}`;
+                link.href = `/c/${encodeURIComponent(category.id)}`;
+                link.textContent = category.title;
+                if (category.id === active) link.setAttribute('aria-current', 'page');
+                return link;
+            }));
+            const current = bar.querySelector('.category-tab.active');
+            if (current && current.scrollIntoView) current.scrollIntoView({ block: 'nearest', inline: 'center' });
+        }
+
         function openCategoryPage(categoryId) {
             closeAllSidebars();
             currentCategoryId = String(categoryId || '');
@@ -3098,13 +3152,15 @@
                 });
         }
 
-        loadCategories()
+        const categoriesReady = loadCategories()
             .then(categories => {
                 renderCategories(categories);
                 const title = document.querySelector('.sidebar-categories-title');
                 if (title) title.hidden = !categories.length;
-                if (jsonCatalog.loaded && getCatalogPageFromLocation() === 'category') {
-                    setJsonCatalogPage('category', false);
+                renderCategoryTabs();
+                const page = getCatalogPageFromLocation();
+                if (jsonCatalog.loaded && (page === 'category' || page === 'home')) {
+                    setJsonCatalogPage(page, false);
                 }
             })
             .catch(err => {
@@ -3803,9 +3859,16 @@
         }
 
         function setJsonCatalogPage(page, updateUrl = true) {
-            const validPage = ['home', 'popular', 'offers', 'related', 'new', 'category'].includes(page)
+            let validPage = ['home', 'popular', 'offers', 'related', 'new', 'category'].includes(page)
                 ? page
                 : 'home';
+            // There is no separate home page: "/" opens the first category.
+            const isLanding = validPage === 'home' && shopCategories.length > 0;
+            if (isLanding) {
+                validPage = 'category';
+                currentCategoryId = shopCategories[0].id;
+                updateUrl = false; // keep the address "/"
+            }
             const isHome = validPage === 'home';
             const slider = document.querySelector('.headphones-slider-wrapper');
             const popularHeader = document.getElementById('popularHeader');
@@ -3830,8 +3893,9 @@
             const categorySection = document.getElementById('categorySection');
             if (categorySection) categorySection.hidden = true;
             if (slider) slider.hidden = !homeLike || slider.dataset.empty === '1';
-            if (back) back.hidden = isHome;
-            if (whatsNew) whatsNew.hidden = !isHome;
+            if (back) back.hidden = isHome || isCategory; // no home page to go back to
+            if (whatsNew) whatsNew.hidden = !(isHome || isLanding);
+            renderCategoryTabs(isCategory ? currentCategoryId : '');
             document.body.classList.toggle('catalog-page-full', !homeLike && validPage !== 'new');
             const popularTitle = popularHeader.querySelector('.section-title');
             const category = isCategory ? shopCategories.find(c => c.id === currentCategoryId) : null;
@@ -3974,6 +4038,7 @@
                     || Number(first.order) - Number(second.order));
             updateSidebarQuickCounts();
             jsonCatalog.loaded = true;
+            try { await categoriesReady; } catch (_) { /* no categories: plain list */ }
             setJsonCatalogPage(getCatalogPageFromLocation(), false);
             // Open a direct /p/<pro-id123> URL immediately. Loading click
             // counts is supplementary and must never block the quantity view.

@@ -6,9 +6,11 @@ Telegram supplier-channels watcher + product opportunity analyzer
   prices & margin, competition between suppliers, final opportunity score /100 + advice.
 - Alerts in your private, code-protected Telegram bot + the ntfy app.
 - Controlled from bot buttons. Send the bot ANY product photo / forward / post link -> report.
-- NEW: every new product goes by itself to your shop's CMS ("📥 الوارد") as a card with a
-  name from Google, a suggested price and the categories; you decide there. Connect once with
-  "🛒 ربط المتجر" (the line is in the CMS: 📥 الوارد ← ربط البوت ديال الموردين).
+- New products arrive with a "🔎 بحث" button: the search (Google Lens + Gemini, which costs
+  credits) only starts when you press it. Several searches run at the same time.
+- The report goes to the shop's other bot (newbott) and the product to the CMS ("📥 الوارد")
+  as a card with a name from Google, a suggested price and the categories; you decide there.
+  Connect the shop once with "🛒 ربط المتجر" (the line is in the CMS: 📥 الوارد ← ربط البوت ديال الموردين).
 No extra packages needed (Python 3 standard library only).
 
   python3 monitor.py               -> run
@@ -16,6 +18,7 @@ No extra packages needed (Python 3 standard library only).
   sudo python3 monitor.py install  -> keep it running forever (systemd)
 """
 import base64
+import concurrent.futures
 import datetime
 import hashlib
 import json
@@ -24,6 +27,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -95,7 +99,19 @@ NTFY_PRIORITY = 5
 SHOP_URL = ""
 SHOP_TOKEN = ""
 # True = كل منتوج جديد فيه تصويرة كيمشي بوحدو للوارد فالـ CMS. False = غير منين تضغط 🛒
+# (مع SEARCH_ON_TAP: كيمشي للوارد من بعد ما تضغط «🔎 بحث»)
 AUTO_SHOP = True
+
+# ---- 🔎 البحث غير ملي تضغط ----
+# True = المنتوج الجديد كيوصل بالتصاور وزر «🔎 بحث». البحث (Google + Gemini، اللي كيصرف
+# الكريدي) ما كيبداش حتى تضغط عليه. False = كل منتوج كيتحلل بوحدو بحال قبل
+SEARCH_ON_TAP = True
+# شحال من بحث يخدمو فنفس الوقت
+PARALLEL_SEARCHES = 3
+# التقارير كيمشيو لبوت تيليغرام ثاني (newbott ديال المتجر).
+# خاويين = كياخدهم بوحدو من الـ .env ديال المتجر (/opt/amani/app/.env)
+REPORT_BOT_TOKEN = ""
+REPORT_CHAT_ID = ""
 
 # ---- أصناف المواقع (تقدر تزيد فيهم) ----
 # المتاجر الكبيرة فالمغرب: كيطلعو النسبة بزاف
@@ -131,6 +147,7 @@ STATE_FILE = os.path.join(HERE, "state.json")
 CACHE_FILE = os.path.join(HERE, "cache.json")
 PHOTOS_DIR = os.path.join(HERE, "photos")
 SHOP_DIR = os.path.join(PHOTOS_DIR, "_shop")
+SHOP_ENV_FILE = "/opt/amani/app/.env"   # newbott's token and chat (AMANI_TELEGRAM_...)
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 STARTED_AT = time.time()
 
@@ -180,11 +197,16 @@ def _load_json(path):
         return {}
 
 
+_SAVE_LOCK = threading.RLock()   # searches run in parallel threads: one writer at a time
+
+
 def _save_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, path)
+    with _SAVE_LOCK:
+        text = json.dumps(data, ensure_ascii=False)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
 
 
 def load_state():
@@ -341,15 +363,15 @@ def chan_state(state, channel):
 
 
 # ----------------------------------------------------------------- telegram bot api
-def bot_api(method, params=None, timeout=30):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+def bot_api(method, params=None, timeout=30, token=None):
+    url = f"https://api.telegram.org/bot{token or BOT_TOKEN}/{method}"
     data = urllib.parse.urlencode(params or {}).encode()
     req = urllib.request.Request(url, data=data, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 
-def bot_upload(method, fields, files):
+def bot_upload(method, fields, files, token=None):
     """multipart/form-data upload. files = {name: (filename, bytes)} or (filename, bytes, content type)"""
     boundary = uuid.uuid4().hex
     body = bytearray()
@@ -363,21 +385,21 @@ def bot_upload(method, fields, files):
                  f"Content-Type: {mime}\r\n\r\n").encode()
         body += data + b"\r\n"
     body += f"--{boundary}--\r\n".encode()
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    url = f"https://api.telegram.org/bot{token or BOT_TOKEN}/{method}"
     req = urllib.request.Request(url, data=bytes(body), headers={
         "User-Agent": UA, "Content-Type": f"multipart/form-data; boundary={boundary}"})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read().decode())
 
 
-def send(chat_id, text, markup=None):
+def send(chat_id, text, markup=None, token=None):
     p = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"}
     if markup:
         p["reply_markup"] = markup
-    return bot_api("sendMessage", p)
+    return bot_api("sendMessage", p, token=token)
 
 
-def send_photos(chat_id, photos, caption, markup=None):
+def send_photos(chat_id, photos, caption, markup=None, token=None):
     """1 photo -> sendPhoto, several -> album (max 10 per message). caption must be <= 1024."""
     for start in range(0, len(photos), 10):
         chunk = photos[start:start + 10]
@@ -386,13 +408,13 @@ def send_photos(chat_id, photos, caption, markup=None):
             fields = {"chat_id": chat_id, "caption": cap}
             if markup:
                 fields["reply_markup"] = markup
-            res = bot_upload("sendPhoto", fields, {"photo": ("1.jpg", chunk[0])})
+            res = bot_upload("sendPhoto", fields, {"photo": ("1.jpg", chunk[0])}, token=token)
         else:
             media = [{"type": "photo", "media": f"attach://p{i}"} for i in range(len(chunk))]
             if cap:
                 media[0]["caption"] = cap
             res = bot_upload("sendMediaGroup", {"chat_id": chat_id, "media": json.dumps(media)},
-                             {f"p{i}": (f"{i}.jpg", d) for i, d in enumerate(chunk)})
+                             {f"p{i}": (f"{i}.jpg", d) for i, d in enumerate(chunk)}, token=token)
         if not res.get("ok"):
             raise RuntimeError(res)
 
@@ -973,7 +995,14 @@ Look at details (shape, buttons, number of parts, design), not only at the type 
 Answer only with JSON: {"r": [{"i": 1, "v": "same"}, ...]} for every image 1..N."""
 _GEMINI_MODEL_FOUND = ""
 _GEMINI_LAST_MODEL = ""
-_GEMINI_EXCHANGES = []  # [(request body, full answer)] of the current check, for the 🔍 Gemini button
+_THREAD = threading.local()  # each search thread keeps its own Gemini exchanges
+
+
+def _exchanges():
+    """[(request body, full answer, model)] of the current check, for the 🔍 Gemini button."""
+    if not hasattr(_THREAD, "exchanges"):
+        _THREAD.exchanges = []
+    return _THREAD.exchanges
 
 
 def _mime(data):
@@ -1074,7 +1103,7 @@ def _ask_gemini(parts):
     body = {"contents": [{"role": "user", "parts": parts}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}
     data = _gemini(body)
-    _GEMINI_EXCHANGES.append((body, data, _GEMINI_LAST_MODEL))
+    _exchanges().append((body, data, _GEMINI_LAST_MODEL))
     text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
     answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
     verdicts = {int(x.get("i", 0)): str(x.get("v", "")).lower() for x in answer.get("r", []) if isinstance(x, dict)}
@@ -1122,7 +1151,7 @@ def save_last_check(label, mine, collage, raw, pictures, mode):
             return copy
 
         exchanges = [{"model": model, "request": readable(body, n * 12), "response": answer}
-                     for n, (body, answer, model) in enumerate(_GEMINI_EXCHANGES)]
+                     for n, (body, answer, model) in enumerate(_exchanges())]
         _save_json(os.path.join(LAST_DIR, "gemini_request.json"),
                    {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label, "mode": mode,
                     "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent",
@@ -1201,7 +1230,7 @@ def verify_morocco(results, photo_url, photo_bytes, label=""):
     if not pictures:
         return False  # nothing could be looked at: keep the old way of counting
     verdicts, raw = {}, ""
-    del _GEMINI_EXCHANGES[:]
+    del _exchanges()[:]
     if pictures:
         collage = make_collage([data for _, data in pictures])
         try:
@@ -1271,7 +1300,7 @@ def shop_analysis(rep):
             "brand": rep.get("brand") or ""}
 
 
-def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link="", rep=None):
+def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link="", rep=None, src=""):
     """Keeps what the 🛒 button needs (photos on disk, text, link, report) and returns its key."""
     key = secrets.token_hex(4)
     files = []
@@ -1285,7 +1314,7 @@ def remember_for_shop(state, channel, pid, text, photos=None, urls=None, link=""
     items = state.setdefault("shop_items", {})
     items[key] = {"ch": channel or "", "pid": pid, "text": (text or "")[:6000], "files": files,
                   "urls": [] if files else [u for u in (urls or []) if u][:9], "link": link or "", "t": time.time(),
-                  "analysis": shop_analysis(rep)}
+                  "analysis": shop_analysis(rep), "src": src or next((u for u in (urls or []) if u), "")}
     while len(items) > SHOP_ITEMS_KEPT:
         old = items.pop(min(items, key=lambda k: items[k].get("t", 0)))
         for path in old.get("files", []):
@@ -1394,6 +1423,183 @@ def link_shop(cid, text):
         send(cid, f"❌ ما قدرتش نوصل للمتجر ({status or 'بلا جواب'}). تأكد من الموقع وعاود.")
 
 
+# ----------------------------------------------------------------- reports -> newbott
+def _read_env(path):
+    values = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    values[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return values
+
+
+def report_target():
+    """(token, [chat ids]) of the bot that gets the reports (newbott), or (None, [])."""
+    token, chats = (REPORT_BOT_TOKEN or "").strip(), str(REPORT_CHAT_ID or "").strip()
+    if not (token and chats):
+        env = _read_env(SHOP_ENV_FILE)
+        token = token or env.get("AMANI_TELEGRAM_BOT_TOKEN", "")
+        chats = chats or env.get("AMANI_TELEGRAM_CHAT_ID", "")
+    ids = [c.strip() for c in chats.split(",") if c.strip()]
+    if not token or not ids or token == BOT_TOKEN:
+        return None, []
+    return token, ids
+
+
+def link_buttons(item):
+    """📢 the post + 🔍 Google Lens (links only: they work in any bot)."""
+    row = []
+    if (item.get("link") or "").startswith("https://"):
+        row.append({"text": "📢 البوست", "url": item["link"]})
+    if (item.get("src") or "").startswith("https://"):
+        row.append({"text": "🔍 Google Lens", "url": lens_link(item["src"])})
+    return row
+
+
+def deliver_report(item, rep, report, photo):
+    """Sends the report to newbott. Returns True when it got there."""
+    token, chats = report_target()
+    if not token:
+        return False
+    title = f"@{item['ch']}" if item.get("ch") else "منتوج"
+    caption = f"📊 {title}\n{summary_lines(rep)}"[:1024]
+    row = link_buttons(item)
+    markup = json.dumps({"inline_keyboard": [row]}) if row else None
+    done = False
+    for chat in chats:
+        try:
+            if photo:
+                send_photos(chat, [photo], caption, token=token)
+                send(chat, report, markup, token=token)
+            else:
+                send(chat, report, markup, token=token)
+            done = True
+        except Exception as e:
+            log(f"report to newbott ({chat}) failed: {e}")
+    return done
+
+
+# ----------------------------------------------------------------- 🔎 search on tap (parallel)
+_POOL = None
+_RUNNING = set()
+_RUN_LOCK = threading.Lock()
+
+
+def pool():
+    global _POOL
+    if _POOL is None:
+        _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(PARALLEL_SEARCHES or 1)),
+                                                      thread_name_prefix="search")
+    return _POOL
+
+
+def background(fn, *args, **kwargs):
+    """Runs fn in a search thread; errors go to the log instead of disappearing."""
+    def safe():
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            log(f"{fn.__name__} failed: {e}")
+    pool().submit(safe)
+
+
+def search_button(key, status=""):
+    return {"text": status or "🔎 بحث وتقرير", "callback_data": f"srch:{key}"}
+
+
+def post_markup(item, key, status=""):
+    rows = []
+    row = link_buttons(item)
+    if row:
+        rows.append(row)
+    action = [search_button(key, status)]
+    if not item.get("shop_sent"):
+        action.append(shop_button(key))
+    rows.append(action)
+    return json.dumps({"inline_keyboard": rows})
+
+
+def set_status(cid, mid, item, key, status):
+    if not (cid and mid):
+        return
+    try:
+        bot_api("editMessageReplyMarkup", {"chat_id": cid, "message_id": mid,
+                                           "reply_markup": post_markup(item, key, status)})
+    except Exception as e:
+        log(f"button update failed: {e}")
+
+
+def item_photo(item):
+    for path in item.get("files", [])[:1]:
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    for url in (item.get("urls") or [item.get("src")])[:1]:
+        if url:
+            try:
+                return http_get_bytes(url)
+            except Exception as e:
+                log(f"photo download failed: {e}")
+    return None
+
+
+def start_search(state, cid, mid, key):
+    item = (state.get("shop_items") or {}).get(key)
+    if not item:
+        send(cid, "❌ هاد المنتوج قديم بزاف. صيفط ليا البوست من جديد (Forward ولا الرابط).")
+        return
+    with _RUN_LOCK:
+        if key in _RUNNING:
+            return                      # already searching: the button says so
+        _RUNNING.add(key)
+    set_status(cid, mid, item, key, "⏳ كنقلب… (حتى لدقيقة)")
+    background(run_search, state, cid, mid, key)
+
+
+def run_search(state, cid, mid, key):
+    """One search in its own thread: Google Lens + Gemini, report -> newbott, card -> CMS."""
+    item = (state.get("shop_items") or {}).get(key)
+    if not item:
+        with _RUN_LOCK:
+            _RUNNING.discard(key)
+        return
+    try:
+        photo = item_photo(item)
+        url = item.get("src") or ""
+        # temporary links (ntfy) last ~3h; Telegram's own links are kept
+        if SEARCH_ENGINE != "vision" and photo and (not url or ("ntfy" in url and time.time() - item.get("t", 0) > 7200)):
+            url = upload_temp_photo(state, photo) or url
+        rep = analyze_photo(state, item.get("ch") or "", url or None, photo, item.get("text") or "")
+        item["analysis"] = shop_analysis(rep)
+        save_state(state)
+        title = f"@{item['ch']}" if item.get("ch") else "منتوج"
+        report = build_report(rep, title)
+        if rep.get("ok") and AUTO_SHOP and SHOP_URL and SHOP_TOKEN and not item.get("shop_sent"):
+            if send_to_shop(state, None, key, quiet=True):
+                item["shop_sent"] = True
+                save_state(state)
+                report += "\n\n📥 تزاد للوارد فالـ CMS"
+        short = (f"{rep['verdict'].split()[0]} {rep['opp']}/100 · 🇲🇦 {rep['presence']}%"
+                 if rep.get("ok") and rep.get("opp") is not None else "⚪ ما تحللش")
+        if deliver_report(item, rep, report, photo):
+            set_status(cid, mid, item, key, f"{short} · 📨 newbott")
+        else:
+            set_status(cid, mid, item, key, short)
+            send(cid, report, json.dumps({"inline_keyboard": [link_buttons(item)]}) if link_buttons(item) else None)
+    except Exception as e:
+        log(f"search {key} failed: {e}")
+        set_status(cid, mid, item, key, "❌ ما خدمش · عاود")
+    finally:
+        with _RUN_LOCK:
+            _RUNNING.discard(key)
+
+
 # ----------------------------------------------------------------- one new post
 def handle_post(state, channel, pid, post, pre_photos=None, link=None):
     body = post["text"] or ("📷 (صورة/فيديو بلا نص)" if post["media"] else "")
@@ -1408,20 +1614,24 @@ def handle_post(state, channel, pid, post, pre_photos=None, link=None):
     has_photo = bool(post["photos"] or photos)
 
     rep = None
-    if CHECK_MOROCCO and has_photo:
+    tap = SEARCH_ON_TAP and CHECK_MOROCCO
+    if CHECK_MOROCCO and has_photo and not tap:
         rep = analyze_photo(state, channel, post["photos"][0] if post["photos"] else None,
                             photos[0] if photos else None, post["text"])
         if rep.get("ok") and SKIP_EXPOSED and rep["presence"] >= EXPOSED_THRESHOLD:
             log(f"{channel}/{pid} skipped: {rep['presence']}% in Morocco")
             return
-    shop_key = remember_for_shop(state, channel, pid, post["text"], photos, post["photos"], link, rep) if has_photo else None
-    auto_sent = bool(shop_key and AUTO_SHOP and SHOP_URL and SHOP_TOKEN
+    shop_key = remember_for_shop(state, channel, pid, post["text"], photos, post["photos"], link, rep,
+                                 src=post["photos"][0] if post["photos"] else "") if has_photo else None
+    auto_sent = bool(shop_key and not tap and AUTO_SHOP and SHOP_URL and SHOP_TOKEN
                      and send_to_shop(state, None, shop_key, quiet=True))
     head = f"🆕 جديد فـ @{channel}\n"
     if rep:
         head += summary_lines(rep) + "\n"
     if auto_sent:
         head += "📥 تزاد للوارد فالـ CMS\n"
+    elif tap and shop_key:
+        head += "🔎 ضغط «بحث» إلا عجبك (التقرير كيمشي لـ newbott)\n"
     elif CHECK_MOROCCO:
         head += "⚪ بلا تصويرة، ما قلبتش عليه\n"
     full = f"{head}\n{body}\n\n{link}"
@@ -1439,6 +1649,8 @@ def handle_post(state, channel, pid, post, pre_photos=None, link=None):
     if shop_key and not auto_sent:
         rows.append([shop_button(shop_key)])
     markup = json.dumps({"inline_keyboard": rows})
+    if tap and shop_key:
+        markup = post_markup(state["shop_items"][shop_key], shop_key)
 
     if NTFY_TOPIC:
         if rep and rep.get("ok"):
@@ -1562,9 +1774,14 @@ def report_for(state, cid, photo_url=None, photo_bytes=None, text="", title="م�
     rows = [buttons] if buttons else []
     pid = int(link.rsplit("/", 1)[1]) if re.search(r"/\d+$", link or "") else 0
     key = remember_for_shop(state, ch, pid, text, [photo_bytes] if photo_bytes else None,
-                            [original_url] if original_url else None, link, rep)
+                            [original_url] if original_url else None, link, rep, src=photo_url or "")
     rows.append([shop_button(key)])
-    send(cid, build_report(rep, title), json.dumps({"inline_keyboard": rows}))
+    item = state["shop_items"][key]
+    if deliver_report(item, rep, build_report(rep, title), photo_bytes or item_photo(item)):
+        send(cid, f"📨 التقرير ديال {title} تصيفط لـ newbott\n{summary_lines(rep)}",
+             json.dumps({"inline_keyboard": rows}))
+    else:
+        send(cid, build_report(rep, title), json.dumps({"inline_keyboard": rows}))
 
 
 def analyze_post(state, cid, channel, pid):
@@ -1663,6 +1880,9 @@ def status_text(state):
             f"المنتوجات اللي فالمغرب فوق {EXPOSED_THRESHOLD}%: "
             f"{'كنخبيهم' if SKIP_EXPOSED else 'كنوريهم'}\n"
             f"ntfy: {'شاعل' if NTFY_TOPIC else 'مطفي'}\n"
+            f"🔎 البحث: {'غير ملي تضغط «بحث»' if SEARCH_ON_TAP else 'أوطوماتيكي'}"
+            f" · {PARALLEL_SEARCHES} فنفس الوقت\n"
+            f"📨 التقارير: {'كيمشيو لـ newbott' if report_target()[0] else 'هنا (newbott ما لقيتوش)'}\n"
             f"🛒 المتجر: {('مربوط (' + SHOP_URL + ')') if (SHOP_URL and SHOP_TOKEN) else 'ما مربوطش'}"
             f"{' · كل منتوج كيمشي للوارد بوحدو' if (AUTO_SHOP and SHOP_URL) else ''}")
 
@@ -1680,7 +1900,8 @@ HELP = ("⌨️ الأزرار كيتحلو بالزر ⌨️ حدا خانة ا
         "🛡 ولا زيد البوت Admin فأي قناة (حتى الخاصة)، وغادي يسولك واش تقبلها\n\n"
         "📊 بغيتي تقرير على أي منتوج؟ صيفط ليا التصويرة ديالو، "
         "ولا دير Forward لبوست، ولا صيفط رابط البوست (t.me/channel/123)\n"
-        "📥 كل منتوج جديد كيمشي بوحدو لـ «الوارد» فالـ CMS: تما كتشوف البطاقة وكتقرر واش تزيدو للمتجر\n"
+        "🔎 تحت كل منتوج جديد زر «بحث»: البحث كيبدا غير ملي تضغط (كيوفر الكريدي)، والتقرير كيمشي لـ newbott\n"
+        "📥 من بعد البحث، المنتوج كيمشي لـ «الوارد» فالـ CMS: تما كتشوف البطاقة وكتقرر واش تزيدو للمتجر\n"
         "/stop : تحبس الإشعارات عليك")
 
 
@@ -1739,11 +1960,17 @@ def handle_callback(state, cq):
     elif data.startswith("an:"):
         try:
             ch, pid = data[3:].rsplit("/", 1)
-            analyze_post(state, cid, ch, int(pid))
+            background(analyze_post, state, cid, ch, int(pid))
         except ValueError:
             pass
+    elif data.startswith("srch:"):
+        start_search(state, cid, mid, data[5:])
     elif data.startswith("shop:"):
-        send_to_shop(state, cid, data[5:])
+        if send_to_shop(state, cid, data[5:]):
+            item = (state.get("shop_items") or {}).get(data[5:])
+            if item:
+                item["shop_sent"] = True
+                save_state(state)
     elif data.startswith("shp:"):
         try:
             ch, pid = data[4:].rsplit("/", 1)
@@ -1875,7 +2102,7 @@ def handle_message(state, msg):
         elif uname and fwd_id:
             offer_post(cid, uname, int(fwd_id))
         elif _photo_from_message(msg):
-            report_for(state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
+            background(report_for, state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
         else:
             send(cid, "❌ هاد القناة خاصة وما فيهاش تصويرة نحللها.")
     elif mode == "add":
@@ -1889,11 +2116,11 @@ def handle_message(state, msg):
         save_settings({"KEYWORDS": new})
         send(cid, "✅ تبدلو الكلمات: " + (", ".join(new) if new else "كل بوست جديد"))
     elif _photo_from_message(msg):
-        report_for(state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
+        background(report_for, state, cid, photo_bytes=download_tg_file(_photo_from_message(msg)), text=text)
     elif post_link:
         offer_post(cid, *post_link)
     elif re.match(r"https?://\S+\.(jpe?g|png|webp)(\?\S*)?$", text, re.I):
-        report_for(state, cid, photo_url=text)
+        background(report_for, state, cid, photo_url=text)
     else:
         send(cid, HELP, KEYBOARD)
 
@@ -1970,7 +2197,7 @@ def handle_channel_post(state, post):
                 os.makedirs(folder, exist_ok=True)
                 with open(os.path.join(folder, f"{mid}_1.jpg"), "wb") as f:
                     f.write(data)
-            if CHECK_MOROCCO and SEARCH_ENGINE != "vision":
+            if CHECK_MOROCCO and SEARCH_ENGINE != "vision" and not SEARCH_ON_TAP:
                 url = upload_temp_photo(state, data)
                 if url:
                     urls = [url]
@@ -2083,6 +2310,13 @@ def main():
                          "التصويرة ديال المورد، الكولاج، والجواب ديالو.", KEYBOARD)
         state["gemini_button_sent"] = True
         state["small_keyboard_sent"] = True
+        save_state(state)
+    if SEARCH_ON_TAP and not state.get("tap_hello_sent"):
+        target = "newbott" if report_target()[0] else "هنا"
+        broadcast(state, "🆕 جديد: المنتوجات الجداد كيوصلو بالتصاور وزر «🔎 بحث وتقرير».\n"
+                         "البحث (Google + Gemini) ما كيبداش حتى تضغط عليه، باش ما يتصرفش الكريدي على منتوجات "
+                         f"ما كتهمكش. تقدر تضغط على بزاف فنفس الوقت. التقرير كيمشي لـ {target}.")
+        state["tap_hello_sent"] = True
         save_state(state)
     if not state.get("small_keyboard_sent"):
         broadcast(state, "⌨️ الأزرار ولاو صغار ومخبيين باش يبان كلشي. كتحلهم بالزر ⌨️ حدا خانة الكتبة "

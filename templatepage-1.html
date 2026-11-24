@@ -4,7 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="google" content="notranslate">
     <!-- Languages: Arabic by default, French, English (no Google Translate) -->
-    <script src="/assets/i18n.js?v=3"></script>
+    <script src="/assets/i18n.js?v=4"></script>
     <title>Amani Market - Entertainment Products</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <meta name="theme-color" content="#0A3A2A">
@@ -78,6 +78,13 @@
         .lang-picker-title span { display: block; }
         /* badges like "-20%" keep their order in Arabic */
         html[dir="rtl"] .product-badge-cms { direction: ltr; unicode-bidi: isolate; }
+        /* "Only 7 left in stock" under the quantity (set in the CMS) */
+        .qm-stock-note { display: flex; align-items: center; gap: 6px; margin: -25px 0 25px; color: #dc2626; font-weight: 600; font-size: 0.92rem; }
+        .qm-stock-note[hidden] { display: none; }
+        .qm-stock-note span { text-decoration: underline; text-decoration-color: currentColor; text-underline-offset: 4px; }
+        .qm-stock-note svg { width: 18px; height: 18px; flex-shrink: 0; }
+        .qm-submit-btn.is-sold-out { opacity: .55; cursor: not-allowed; }
+        .cart-item-color:empty, .cart-detail-item-variants:empty { display: none; }
         /* the scrolling announcement keeps moving the same way in Arabic */
         html[dir="rtl"] .announcement-bar,
         html[dir="rtl"] .announcement-track { direction: ltr; } /* the bar too, or the text runs out and leaves it empty */
@@ -2371,6 +2378,7 @@
                 <span class="qm-qty-val" id="qmQtyVal">1</span>
                 <button class="qm-qty-btn" onclick="updateQmQty(1)">+</button>
             </div>
+            <p class="qm-stock-note" id="qmStockNote" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5 1 21.5h22L12 2.5Zm0 4.6 7.6 13.1H4.4L12 7.1Zm-1 4.4v4.6h2v-4.6h-2Zm0 5.9v2h2v-2h-2Z"/></svg><span id="qmStockText"></span></p>
 
             <button class="qm-submit-btn" id="qmSubmitBtn" onclick="confirmQuickSelection()">
                 Add to Cart • <span id="qmTotalPrice" class="notranslate">99 DH</span> <i class="fa-solid fa-bag-shopping"></i>
@@ -3800,9 +3808,7 @@
         }
 
         function productCardFromJson(product) {
-            const colors = product.colors.length
-                ? product.colors
-                : [{ name: 'Color', options: [{ name: 'Default', img: product.image, soldOut: false, priceAdd: 0 }] }];
+            const colors = product.colors; // no colors / sizes: no options at all
             const oldPrice = product.oldPrice > product.price ? product.oldPrice : '';
             const badges = Array.isArray(product.badges) ? product.badges : [];
             const badgeMarkup = badges.map((badge, index) => {
@@ -4495,13 +4501,8 @@
             if (!container) return;
             container.innerHTML = '';
 
-            if (!currentQmProduct.variants.length) {
-                const emptyMessage = document.createElement('p');
-                emptyMessage.className = 'qm-section-title';
-                emptyMessage.innerText = 'No options available';
-                container.appendChild(emptyMessage);
-                return;
-            }
+            container.hidden = !currentQmProduct.variants.length; // no colors / sizes: nothing to show
+            if (!currentQmProduct.variants.length) return;
 
             currentQmProduct.variants.forEach((group, groupIndex) => {
                 const groupEl = document.createElement('section');
@@ -4613,6 +4614,7 @@
                 oldPrice,
                 variants: parseProductVariants(prod)
             };
+            currentQmProduct.stock = stockFor(currentQmProduct.id, prod.getAttribute('data-id'));
             selectedVariants = {};
             currentQty = 1;
 
@@ -4626,6 +4628,7 @@
             renderQmMedia(prod, img);
             document.getElementById('qmQtyVal').innerText = currentQty;
             renderQmVariants();
+            renderQmStock();
             updateQmPriceDisplay();
             updateQmTotalDisplay();
 
@@ -4836,9 +4839,54 @@
             }
         }
 
+        // Units left, set in the CMS (/api/stock). Shown under the quantity from 10 down.
+        const LOW_STOCK_SHOW = 10;
+        let shopStock = {};
+        fetch('/api/stock', { cache: 'no-store' })
+            .then(response => response.ok ? response.json() : {})
+            .then(data => {
+                shopStock = (data && data.stock) || {};
+                const modal = document.getElementById('quickSelectModal');
+                if (modal && modal.classList.contains('active') && currentQmProduct.id) {
+                    currentQmProduct.stock = stockFor(currentQmProduct.id);
+                    renderQmStock();
+                }
+            })
+            .catch(() => { /* no stock shown */ });
+
+        function stockFor(...ids) {
+            for (const id of ids) {
+                const left = shopStock[String(id || '')];
+                if (Number.isInteger(left)) return left;
+            }
+            return null;
+        }
+
+        function renderQmStock() {
+            const note = document.getElementById('qmStockNote');
+            const text = document.getElementById('qmStockText');
+            const button = document.getElementById('qmSubmitBtn');
+            const left = currentQmProduct.stock;
+            if (Number.isInteger(left) && left > 0 && currentQty > left) {
+                currentQty = left;
+                document.getElementById('qmQtyVal').innerText = currentQty;
+            }
+            const soldOut = left === 0;
+            if (button) {
+                button.disabled = soldOut;
+                button.classList.toggle('is-sold-out', soldOut);
+            }
+            if (!note || !text) return;
+            note.hidden = !(Number.isInteger(left) && left <= LOW_STOCK_SHOW);
+            text.textContent = soldOut ? 'Out of stock' : `Only ${left} left in stock`;
+        }
+
         function updateQmQty(delta) {
             currentQty += delta;
             if (currentQty < 1) currentQty = 1;
+            if (Number.isInteger(currentQmProduct.stock) && currentQmProduct.stock > 0 && currentQty > currentQmProduct.stock) {
+                currentQty = currentQmProduct.stock;
+            }
             document.getElementById('qmQtyVal').innerText = currentQty;
             updateQmTotalDisplay();
         }
@@ -4870,6 +4918,7 @@
         }
 
         function confirmQuickSelection() {
+            if (currentQmProduct.stock === 0) return; // sold out
             const selected = currentQmProduct.variants
                 .map((group, groupIndex) => {
                     const option = group.options[selectedVariants[groupIndex]];
@@ -4901,7 +4950,7 @@
                 title: currentQmProduct.title,
                 price: getSelectedUnitPrice(),
                 variants: selected,
-                colorName: colorSelection?.option || 'Default',
+                colorName: colorSelection?.option || '',
                 image: selectedImage,
                 qty: currentQty,
                 variantLabel: colorSelection?.group || 'Option'
@@ -5023,6 +5072,7 @@
                 })
                     .join(separator);
             }
+            if (!item.colorName || item.colorName === 'Default') return ''; // no colors / sizes
             const fallbackOption = String(item.colorName || 'default');
             const fallbackGroup = normalizeLegacyGroupName(item.variantLabel || 'option', fallbackOption);
             return `${fallbackGroup.toLowerCase()} : ${fallbackOption.toLowerCase()}`;
@@ -5242,7 +5292,7 @@
             keys.forEach((key, index) => {
                 const item = cartItems[key];
                 const itemTotal = item.price * item.qty;
-                message += `${index + 1}- ${item.title} (${formatCartVariants(item)}) x ${item.qty} = ${itemTotal} DH\n`;
+                message += `${index + 1}- ${item.title}${formatCartVariants(item) ? ` (${formatCartVariants(item)})` : ''} x ${item.qty} = ${itemTotal} DH\n`;
                 total += itemTotal;
             });
 
@@ -5455,7 +5505,7 @@
         keys.forEach((key, index) => {
             const item = cartItems[key];
             const itemTotal = item.price * item.qty;
-            message += `${index + 1}- ${item.title} (${formatCartVariants(item)}) x ${item.qty} = ${itemTotal} DH\n`;
+            message += `${index + 1}- ${item.title}${formatCartVariants(item) ? ` (${formatCartVariants(item)})` : ''} x ${item.qty} = ${itemTotal} DH\n`;
             total += itemTotal;
         });
 

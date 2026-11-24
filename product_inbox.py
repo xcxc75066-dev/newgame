@@ -213,10 +213,27 @@ def suggest_types(types: list[dict[str, Any]], text: str) -> list[str]:
     return found[:3]
 
 
+def _options(groups: Any) -> list[dict[str, Any]]:
+    """[{name, options: ["Red", "Blue"]}] from the card -> the shop's option groups."""
+    out = []
+    for group in groups if isinstance(groups, list) else []:
+        if not isinstance(group, dict):
+            continue
+        name = " ".join(str(group.get("name") or "").split())[:40]
+        names = [" ".join(str(o.get("name") if isinstance(o, dict) else o).split())[:60]
+                 for o in (group.get("options") or [])[:20]]
+        options = [{"name": n, "img": "", "soldOut": False, "priceAdd": 0} for n in dict.fromkeys(names) if n]
+        if name and options:
+            out.append({"name": name, "options": options})
+    return out[:4]
+
+
 # ------------------------------------------------------------------- the inbox
 class ProductInbox:
     def __init__(self, cms: Any, data_dir: Path, public_url: str = "") -> None:
         self.content = cms.content
+        self.stock = getattr(cms, "stock", None)
+        self.ai: Any = None  # AiWriter: names the product from its photo
         self.public_url = public_url.rstrip("/")
         self.dir = data_dir / "intake"
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -346,7 +363,40 @@ class ProductInbox:
                 oldest = min(items, key=lambda k: items[k].get("created", 0))
                 self._remove_images(items.pop(oldest).get("images", []))
             self._save(items)
+        if self.ai is not None and self.ai.configured():
+            threading.Thread(target=self._name_from_photo, args=(item["id"], images[0]),
+                             name="inbox-name", daemon=True).start()
         return item["id"]
+
+    def _name_from_photo(self, item_id: str, image: str) -> None:
+        """The card's name comes from the photo (Gemini), not from the supplier or Google."""
+        try:
+            names = self.ai.name_from_photo(image)
+        except Exception:  # noqa: BLE001 - the Google names stay
+            return
+        with self._lock:
+            items = self._load()
+            item = items.get(item_id)
+            if not item:
+                return
+            item["names"] = names  # only the photo's names, not the supplier's or Google's
+            item["title"] = names[0]
+            item["names_from_photo"] = True
+            self._save(items)
+
+    def name_now(self, item_id: str) -> dict[str, Any]:
+        """The ✨ button on a card: names from the photo right away."""
+        with self._lock:
+            item = self._load().get(str(item_id))
+        if not item:
+            raise CmsError(404, "هاد المنتوج ما بقاش فالوارد.")
+        names = self.ai.name_from_photo(item["images"][0])
+        with self._lock:
+            items = self._load()
+            if str(item_id) in items:
+                items[str(item_id)].update(names=names, title=names[0], names_from_photo=True)
+                self._save(items)
+        return {"names": names}
 
     # ------------------------------------------------------------ decisions
     def delete(self, item_id: str) -> None:
@@ -386,7 +436,7 @@ class ProductInbox:
                 "gallery": chosen[1:],
                 "video": None,
                 "badges": [],
-                "colors": [],
+                "colors": _options(payload.get("colors")),
                 "hidden": bool(payload.get("hidden")),
                 "addedAt": date.today().isoformat(),
                 "categories": [c for c in dict.fromkeys(str(x) for x in wanted) if c in known],
@@ -410,5 +460,10 @@ class ProductInbox:
                 raise CmsError(409, "المنتجات كتبدلات فنفس الوقت. عاود ضغط.")
             items.pop(item_id, None)
             self._save(items)
+        if self.stock is not None and str(payload.get("stock") or "").strip():
+            try:
+                self.stock.set(product_id, payload.get("stock"))
+            except CmsError:
+                pass
         self._remove_images([url for url in item["images"] if url not in chosen])
         return {"slug": slug, "url": f"{self.public_url}/p/{slug}" if self.public_url and slug else ""}

@@ -1267,9 +1267,15 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/cms/inbox/publish" and method == "POST":
                 self._send_cms(HTTPStatus.OK, {"ok": True, **inbox.publish(self._read_json())})
                 return
+            if path == "/api/cms/inbox/name" and method == "POST":
+                self._send_cms(HTTPStatus.OK, {"ok": True, **inbox.name_now(self._read_json().get("id"))})
+                return
             if path == "/api/cms/inbox/delete" and method == "POST":
                 inbox.delete(str(self._read_json().get("id") or ""))
                 self._send_cms(HTTPStatus.OK, {"ok": True})
+                return
+            if path == "/api/cms/ai/name" and method == "POST":
+                self._send_cms(HTTPStatus.OK, {"ok": True, "names": self.server.ai.name_from_photo(self._read_json().get("image"))})
                 return
             if path == "/api/cms/ai/describe" and method == "POST":
                 self._send_cms(HTTPStatus.OK, {"ok": True, "options": self.server.ai.describe(self._read_json())})
@@ -1654,6 +1660,7 @@ class AmaniHTTPServer(ThreadingHTTPServer):
         public_url = next((o for o in config.allowed_origins if o.startswith("https://")), "")
         self.inbox = ProductInbox(self.cms, config.db_path.parent, public_url)
         self.ai = AiWriter(self.cms.content)  # "✨ اقترح وصف" (Gemini, key in .env)
+        self.inbox.ai = self.ai  # new inbox cards get their name from the photo
         self.translator = Translator(self.cms.content, self.ai)  # shop texts in ar / fr / en
         super().__init__((config.host, config.port), AmaniRequestHandler)
 

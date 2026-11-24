@@ -51,6 +51,12 @@
     'BACK': ['رجوع', 'RETOUR'],
     'OUR POPULAR PRODUCTS': ['منتجاتنا الأكثر طلباً', 'NOS PRODUITS POPULAIRES'],
     'VIEW MORE': ['عرض المزيد', 'VOIR PLUS'],
+    'Privacy Policy': ['سياسة الخصوصية', 'Politique de confidentialité'],
+    'Terms of Sale': ['شروط البيع', 'Conditions de vente'],
+    'Returns & Refunds': ['الإرجاع والاسترداد', 'Retours et remboursements'],
+    'Shipping & Payment': ['التوصيل والدفع', 'Livraison et paiement'],
+    'Email': ['البريد الإلكتروني', 'E-mail'],
+    'Close': ['إغلاق', 'Fermer'],
     'Out of stock': ['نفد من المخزون', 'Rupture de stock'],
     'More': ['المزيد', 'Plus'],
     'Show more': ['عرض المزيد', 'Voir plus'],
@@ -257,7 +263,9 @@
     document.body.style.overflow = '';
   }
 
-  function showPicker() {
+  // First visit: must choose. From the language button: can be closed.
+  function showPicker(closable) {
+    if (document.getElementById('langPicker')) return;
     var box = document.createElement('div');
     box.id = 'langPicker';
     box.className = 'lang-picker notranslate';
@@ -280,15 +288,30 @@
       button.type = 'button';
       button.lang = item[0];
       button.textContent = item[1];
+      if (item[0] === lang) button.className = 'is-current';
       button.addEventListener('click', function () { choose(item[0]); });
       row.appendChild(button);
     });
     card.appendChild(title);
     card.appendChild(row);
+    if (closable) {
+      var close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'lang-picker-close';
+      close.setAttribute('aria-label', 'Close');
+      close.textContent = '\u00D7';
+      close.addEventListener('click', closePicker);
+      card.appendChild(close);
+      box.addEventListener('click', function (event) { if (event.target === box) closePicker(); });
+    }
     box.appendChild(card);
     document.body.appendChild(box);
     document.body.style.overflow = 'hidden';
   }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && chosen) closePicker();
+  });
 
   function bindButtons(root) {
     (root || document).querySelectorAll('[data-lang]').forEach(function (button) {
@@ -308,7 +331,15 @@
     observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
     bindButtons(document);
     new MutationObserver(function () { bindButtons(document); }).observe(document.body, { childList: true, subtree: true });
-    if (!chosen) showPicker();
+    if (!chosen) showPicker(false);
+    // the language button in the side menu opens the same window as the first visit
+    document.addEventListener('click', function (event) {
+      var target = event.target.closest && event.target.closest('[data-lang-picker]');
+      if (!target) return;
+      event.preventDefault();
+      if (typeof window.closeAllSidebars === 'function') window.closeAllSidebars();
+      showPicker(true);
+    });
     fetch('/api/i18n/' + lang, { cache: 'no-cache' })
       .then(function (response) { return response.ok ? response.json() : {}; })
       .then(function (data) {
@@ -318,7 +349,8 @@
       .catch(function () { /* products stay in their language */ });
   }
 
-  window.AmaniI18n = { lang: lang, t: function (text) { var r = translateText(text); return r === null ? text : r; }, choose: choose };
+  window.AmaniI18n = { lang: lang, t: function (text) { var r = translateText(text); return r === null ? text : r; }, choose: choose,
+    pick: function () { showPicker(true); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 })();

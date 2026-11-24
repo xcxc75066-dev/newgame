@@ -1271,7 +1271,8 @@
   function inboxCard(item) {
     const form = {
       images: [...item.images], title: item.title, price: String(item.price), oldPrice: String(item.oldPrice || ''),
-      description: item.description || '', categories: [...(item.categories || [])], types: [...(item.types || [])]
+      description: item.description || '', categories: [...(item.categories || [])], types: [...(item.types || [])],
+      stock: '', hasOptions: false, groups: []
     };
     const m = item.market || {};
     const card = h('article', { class: 'inbox-card' });
@@ -1301,9 +1302,53 @@
     if (m.brand) facts.push(`🏷 فيه ماركة: ${m.brand}`);
 
     const title = h('input', { value: form.title, dir: 'auto', maxlength: '120', oninput: (e) => { form.title = e.target.value; } });
-    const nameChips = h('div', { class: 'chips wrap' }, ...(item.names || []).map((name) => h('button', {
-      type: 'button', class: 'chip small', onclick: () => { form.title = name; title.value = name; }
-    }, name)));
+    const nameChips = h('div', { class: 'chips wrap' });
+    const nameLabel = h('small', { class: 'muted' });
+    const drawNames = () => {
+      nameLabel.textContent = item.names_from_photo ? 'اقتراحات من التصويرة:' : 'اقتراحات:';
+      nameChips.replaceChildren(...(item.names || []).map((name) => h('button', {
+        type: 'button', class: 'chip small', onclick: () => { form.title = name; title.value = name; }
+      }, name)));
+    };
+    drawNames();
+    // ✨ the name comes from the photo (Gemini), not from the supplier or Google
+    const nameButton = h('button', { type: 'button', class: 'chip dashed', onclick: async () => {
+      nameButton.disabled = true;
+      try {
+        const data = await api('/inbox/name', { method: 'POST', body: { id: item.id } });
+        item.names = data.names;
+        item.names_from_photo = true;
+        form.title = data.names[0];
+        title.value = data.names[0];
+        drawNames();
+      } catch (error) { toast(error.message, 'error'); }
+      nameButton.disabled = false;
+    } }, icon('spark'), 'سمية من التصويرة');
+
+    // stock + colors / sizes, as in the product editor
+    const stock = h('input', { value: '', inputmode: 'numeric', dir: 'ltr', placeholder: 'خاوي = ما كيبان والو',
+      oninput: (e) => { form.stock = e.target.value.trim(); } });
+    const groupsBox = h('div', { class: 'inbox-groups', hidden: true });
+    const drawGroups = () => {
+      groupsBox.replaceChildren(
+        ...form.groups.map((group, gi) => h('div', { class: 'grid-2' },
+          h('label', { class: 'field' }, h('span', { text: 'المجموعة' }),
+            h('input', { value: group.name, dir: 'auto', maxlength: '40', placeholder: 'اللون / الحجم', oninput: (e) => { group.name = e.target.value; } })),
+          h('label', { class: 'field' }, h('span', { text: 'الخيارات (فرق بفاصلة)' }),
+            h('input', { value: group.options, dir: 'auto', placeholder: 'أحمر، أزرق، أسود', oninput: (e) => { group.options = e.target.value; } })),
+          h('button', { type: 'button', class: 'btn ghost small', icon: 'trash', onclick: () => { form.groups.splice(gi, 1); drawGroups(); } }, 'حيد'))),
+        h('div', { class: 'chips wrap' },
+          h('button', { type: 'button', class: 'chip dashed', onclick: () => { form.groups.push({ name: 'Color', options: '' }); drawGroups(); } }, icon('plus'), 'اللون'),
+          h('button', { type: 'button', class: 'chip dashed', onclick: () => { form.groups.push({ name: 'Size', options: '' }); drawGroups(); } }, icon('plus'), 'الحجم')));
+    };
+    const optionsSwitch = h('label', { class: 'switch' },
+      h('input', { type: 'checkbox', onchange: (e) => {
+        form.hasOptions = e.target.checked;
+        groupsBox.hidden = !e.target.checked;
+        if (e.target.checked && !form.groups.length) form.groups.push({ name: 'Color', options: '' });
+        drawGroups();
+      } }),
+      h('span', { class: 'slider' }), h('span', { text: 'هاد المنتوج عندو ألوان ولا أحجام' }));
 
     const hint = h('p', { class: 'note' });
     const drawHint = () => {
@@ -1329,13 +1374,15 @@
       if (!form.title.trim()) return toast('كتب سمية المنتوج', 'error');
       if (!(Number(form.price) > 0)) return toast('كتب الثمن', 'error');
       if (!form.images.length) return toast('ختار على الأقل تصويرة وحدة', 'error');
+      if (form.stock && !/^\d{1,6}$/.test(form.stock)) return toast('المخزون خاصو يكون رقم (ولا خليه خاوي).', 'error');
       if (!form.categories.length && state.inboxCategories.length && !confirm('ما ختاريتي حتى تصنيف. نزيدو بلا تصنيف؟')) return;
       button.disabled = true;
       try {
         await api('/inbox/publish', { method: 'POST', body: {
           id: item.id, title: form.title.trim(), price: Number(form.price),
           oldPrice: form.oldPrice ? Number(form.oldPrice) : 0, description: form.description,
-          categories: form.categories, types: form.types, images: form.images, hidden
+          categories: form.categories, types: form.types, images: form.images, hidden, stock: form.stock,
+          colors: form.hasOptions ? form.groups.map((g) => ({ name: g.name.trim(), options: g.options.split(/[,،]/).map((o) => o.trim()).filter(Boolean) })) : []
         } });
         toast(hidden ? 'تزاد مخفي ✓ تقدر تكملو من «المنتجات»' : 'تزاد للمتجر ✓ راه ظاهر دابا', 'success');
         state.inbox = state.inbox.filter((x) => x.id !== item.id);
@@ -1385,15 +1432,17 @@
       } catch (error) { toast(error.message, 'error'); }
     } }, icon('trash'), 'حيد');
 
-    card.append(
+    card.append(...[
       strip,
       facts.length ? h('div', { class: 'facts' }, ...facts.map((f) => h('span', { text: f }))) : null,
       h('label', { class: 'field' }, h('span', { text: 'سمية المنتوج' }), title),
-      (item.names || []).length > 1 ? h('div', {}, h('small', { class: 'muted', text: 'اقتراحات من Google:' }), nameChips) : null,
+      h('div', {}, nameLabel, nameChips, nameButton),
       h('div', { class: 'grid-2' },
         h('label', { class: 'field' }, h('span', { text: 'الثمن (DH)' }), price),
         h('label', { class: 'field' }, h('span', { text: 'قبل التخفيض' }), oldPrice)),
       hint,
+      h('label', { class: 'field' }, h('span', { text: 'المخزون (شحال من حبة)' }), stock),
+      h('div', {}, optionsSwitch, groupsBox),
       h('label', { class: 'field' }, h('span', { text: 'الوصف' }), description),
       aiButton, aiBox,
       h('div', {}, h('small', { class: 'muted', text: 'التصنيف:' }), cats),
@@ -1405,7 +1454,7 @@
       h('div', { class: 'inbox-meta' },
         h('small', { class: 'muted', text: `${item.source || ''} · ${new Date(item.created * 1000).toLocaleString('fr-MA', { dateStyle: 'short', timeStyle: 'short' })}` }),
         item.link ? h('a', { href: item.link, target: '_blank', rel: 'noopener', text: 'البوست ديال المورد ↗' }) : null)
-    );
+    ].filter(Boolean));
     return card;
   }
 

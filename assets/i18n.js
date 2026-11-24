@@ -158,15 +158,10 @@
   // (U+2060 after them).
   var BIDI_PLACES = '.product-title, .qm-title, .qm-description, .cart-item-title';
   var ISOLATES = /[\u2060\u2066-\u2069]/g;
-  // A run may be in quotes ("HAPPY RABBIT"): the quotes stay with it. A short run
-  // stays on one line (no-break spaces), so a phrase is never cut in two.
-  var LTR_RUN = /["\u201C\u00AB]?[A-Za-z0-9\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F\u00B2\u00B3\u00B0%+\-\u2013\/.,:\u00D7*'\u2019 ]*[A-Za-z0-9\u00C0-\u024F\u00B2\u00B3\u00B0%]["\u201D\u00BB]?/g;
+  var LTR_RUN = /[A-Za-z0-9\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F²³°%+\-–\/.,:×*'’ ]*[A-Za-z0-9\u00C0-\u024F²³°%]/g;
   function isolate(text) {
     return text.replace(LTR_RUN, function (run) {
-      if (!/[A-Za-z\u00C0-\u024F]|\d\D+\d/.test(run)) return run;
-      run = run.replace(/[\-\u2013\/]/g, '$&\u2060');
-      if (run.length <= 28) run = run.replace(/ /g, '\u00A0');
-      return '\u2066' + run + '\u2069';
+      return /[A-Za-z\u00C0-\u024F]|\d\D+\d/.test(run) ? '\u2066' + run.replace(/[\-–\/]/g, '$&\u2060') + '\u2069' : run;
     });
   }
   function wantsIsolates(node) {
@@ -204,7 +199,6 @@
     var mark = ownWrites.get(node);
     if ((mark && mark.data === node.data && mark.generation === generation) || skip(node)) return;
     var data = node.data.replace(ISOLATES, '');
-    if (data !== node.data) data = data.replace(/\u00A0/g, ' '); // our no-break spaces
     var result = translateText(data);
     var next = result === null ? data : data.match(/^\s*/)[0] + result + data.match(/\s*$/)[0];
     if (wantsIsolates(node)) next = isolate(next);

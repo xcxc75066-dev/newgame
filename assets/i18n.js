@@ -51,6 +51,7 @@
     'BACK': ['رجوع', 'RETOUR'],
     'OUR POPULAR PRODUCTS': ['منتجاتنا الأكثر طلباً', 'NOS PRODUITS POPULAIRES'],
     'VIEW MORE': ['عرض المزيد', 'VOIR PLUS'],
+    'Out of stock': ['نفد من المخزون', 'Rupture de stock'],
     'More': ['المزيد', 'Plus'],
     'Show more': ['عرض المزيد', 'Voir plus'],
     'CATEGORY': ['الفئة', 'CATÉGORIE'],
@@ -113,6 +114,18 @@
     [/^Choose preferred (.+):$/, function (m, t) { return ['اختر ' + t(m[1]) + ':', 'Choisissez : ' + t(m[1])]; }],
     [/^What's your (.+):$/, function (m, t) { return [t(m[1]) + ':', t(m[1]) + ' :']; }],
     [/^(\d+) products?$/, function (m) { return [m[1] + ' منتج', m[1] + ' produits']; }],
+    [/^Only (\d+) left in stock$/, function (m) {
+      var n = Number(m[1]);
+      var ar = n === 1 ? 'يتبقى عنصر واحد في المخزون' : n === 2 ? 'يتبقى عنصران في المخزون'
+        : n <= 10 ? 'تتبقى ' + n + ' عناصر في المخزون' : 'يتبقى ' + n + ' عنصرًا في المخزون';
+      return [ar, n === 1 ? 'Plus qu’un article en stock' : 'Plus que ' + n + ' articles en stock'];
+    }],
+    [/^(.+): only (\d+) left in stock\.$/, function (m) {
+      return [m[1] + ': يتبقى ' + m[2] + ' فقط في المخزون.', m[1] + ' : plus que ' + m[2] + ' en stock.'];
+    }],
+    [/^(.+): sold out\. Please refresh the page\.$/, function (m) {
+      return [m[1] + ': نفد من المخزون. حدّث الصفحة.', m[1] + ' : rupture de stock. Actualisez la page.'];
+    }],
     [/^Quantity: (\d+) ·$/, function (m) { return ['الكمية: ' + m[1] + ' ·', 'Quantité : ' + m[1] + ' ·']; }],
     [/^\/ item\)?$/, function (m) { return ['للقطعة' + (m[0].slice(-1) === ')' ? ')' : ''), '/ pièce' + (m[0].slice(-1) === ')' ? ')' : '')]; }],
   ];

@@ -504,8 +504,34 @@ class OrderStore:
     def __init__(self, database_path: Path, catalog: ProductCatalog | None = None) -> None:
         self.database_path = database_path
         self.catalog = catalog
+        self.stock: Any = None  # cms_backend.StockStore: units left per product (optional)
+        self._stock_lock = threading.Lock()
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialise()
+
+    # -------------------------------------------------------------- stock
+    def _stock_deltas(self, items: list[dict[str, Any]], sign: int) -> dict[str, int]:
+        """{product id in the stock file: units} for these order items."""
+        deltas: dict[str, int] = {}
+        for item in items:
+            product = self.catalog.find(str(item.get("product_id") or "")) if self.catalog else None
+            key = str((product or {}).get("id") or "")
+            if key:
+                deltas[key] = deltas.get(key, 0) + sign * int(item.get("quantity") or 0)
+        return deltas
+
+    def _check_stock(self, order: dict[str, Any]) -> None:
+        if self.stock is None:
+            return
+        left = self.stock.all()
+        titles = {str((self.catalog.find(str(i.get("product_id") or "")) or {}).get("id") or ""): i["title"]
+                  for i in order["items"]} if self.catalog else {}
+        for key, wanted in self._stock_deltas(order["items"], 1).items():
+            if key in left and wanted > left[key]:
+                title = titles.get(key, "")
+                if left[key] == 0:
+                    raise OrderValidationError(f"{title}: sold out. Please refresh the page.")
+                raise OrderValidationError(f"{title}: only {left[key]} left in stock.")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=15)
@@ -606,6 +632,14 @@ class OrderStore:
 
     def create_order(self, payload: dict[str, Any], client_ip: str) -> dict[str, Any]:
         order = validate_order_payload(payload, self.catalog)
+        with self._stock_lock:          # two buyers can't take the last unit together
+            self._check_stock(order)
+            saved = self._insert_order(order, client_ip)
+            if self.stock is not None:
+                self.stock.change(self._stock_deltas(order["items"], -1))
+        return saved
+
+    def _insert_order(self, order: dict[str, Any], client_ip: str) -> dict[str, Any]:
         order_id = str(uuid.uuid4())
         order_number = self._order_number()
         timestamp = utc_now()
@@ -713,6 +747,7 @@ class OrderStore:
             raise OrderValidationError(
                 f"status must be one of: {', '.join(sorted(ALLOWED_STATUSES))}."
             )
+        before = self.get_order(order_id)
         with self._connect() as connection:
             cursor = connection.execute(
                 "UPDATE orders SET status = ?, updated_at = ? WHERE order_id = ?",
@@ -720,7 +755,12 @@ class OrderStore:
             )
             if cursor.rowcount == 0:
                 return None
-        return self.get_order(order_id)
+        after = self.get_order(order_id)
+        # A cancelled order gives its units back; un-cancelling takes them again.
+        if self.stock is not None and before and after and (before["status"] == "cancelled") != (status == "cancelled"):
+            with self._stock_lock:
+                self.stock.change(self._stock_deltas(after["items"], 1 if status == "cancelled" else -1))
+        return after
 
     def record_product_click(self, product_id: str, fingerprint: str) -> tuple[bool, int]:
         now = utc_now()
@@ -1124,6 +1164,14 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                     "types": cms.content.types(),
                 })
                 return
+            if path == "/api/cms/stock" and method == "GET":
+                self._send_cms(HTTPStatus.OK, {"ok": True, "stock": cms.stock.all()})
+                return
+            if path == "/api/cms/stock" and method == "PUT":
+                payload = self._read_json()
+                left = cms.stock.set(payload.get("id"), payload.get("stock"))
+                self._send_cms(HTTPStatus.OK, {"ok": True, "id": payload.get("id"), "stock": left})
+                return
             if path == "/api/cms/types" and method == "PUT":
                 types = cms.content.save_types(self._read_json().get("types"))
                 self._send_cms(HTTPStatus.OK, {"ok": True, "types": types})
@@ -1383,6 +1431,19 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json({"ok": True, "language": language, "texts": self.server.translator.table(language)})
             return
+        if path == "/api/stock":
+            # Units left of the products the owner follows, by the ids the shop uses.
+            left = self.server.cms.stock.all()
+            stock: dict[str, int] = {}
+            if left:
+                lists, _ = self.server.cms.content.read()
+                for product in (p for items in lists.values() for p in items):
+                    key = str(product.get("id") or "")
+                    if key in left:
+                        for name in {key, str(product.get("pro-id123") or "")} - {""}:
+                            stock[name] = left[key]
+            self._send_json({"ok": True, "stock": stock})
+            return
         if path == "/api/banners":
             # null = never set in the CMS: the shop keeps its built-in pictures
             self._send_json({"ok": True, "banners": self.server.cms.content.banners()})
@@ -1584,6 +1645,7 @@ class AmaniHTTPServer(ThreadingHTTPServer):
         )
         self.catalog = ProductCatalog(self.cms.content.products_dir)
         self.store = OrderStore(config.db_path, self.catalog)
+        self.store.stock = self.cms.stock
         self.analytics = Analytics(
             config.db_path,
             lambda: [p for items in self.cms.content.read()[0].values() for p in items],

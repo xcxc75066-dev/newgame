@@ -228,7 +228,7 @@
           <label class="field"><span>اسم المنتج *</span><input id="f-title" dir="auto" maxlength="120" required></label>
           <label class="field"><span>الماركة</span><input id="f-brand" dir="auto" maxlength="60" placeholder="AMANI PARFUMS"></label>
           <label class="field"><span>الوصف</span><textarea id="f-description" dir="auto" rows="4" maxlength="2000"></textarea></label>
-          <button type="button" class="btn secondary block" id="aiDescribeBtn"><span data-icon="spark"></span>اقترح 3 أوصاف (AI)</button>
+          <button type="button" class="btn secondary block" id="aiDescribeBtn"><span data-icon="spark"></span>اقترح 3 أوصاف من التصويرة (AI)</button>
           <div class="ai-options" id="aiOptions" hidden></div>
         </fieldset>
 
@@ -239,6 +239,12 @@
             <label class="field"><span>قبل التخفيض</span><input id="f-oldPrice" inputmode="decimal" dir="ltr" placeholder="اختياري"></label>
           </div>
           <p class="note" id="discountHint"></p>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend>المخزون</legend>
+          <label class="field"><span>شحال باقي من حبة</span><input id="f-stock" inputmode="numeric" dir="ltr" placeholder="خاوي = ما كيبان والو"></label>
+          <p class="note">ملي يبقى <b>10 ولا أقل</b>، كيبان فالمتجر بالأحمر تحت الكمية: «تتبقى 7 عناصر في المخزون». كينقص بوحدو مع كل طلب، وكيرجع إلا ألغيتي الطلب. <b>0</b> = نفد المخزون (ما يقدرش يطلبو).</p>
         </fieldset>
 
         <fieldset class="card">
@@ -267,11 +273,14 @@
 
         <fieldset class="card">
           <legend>الخيارات (الحجم، اللون…)</legend>
-          <div id="groupsEditor"></div>
-          <div class="chips wrap">
-            <button type="button" class="chip dashed" data-preset-group="size"><span data-icon="plus"></span>الحجم</button>
-            <button type="button" class="chip dashed" data-preset-group="color"><span data-icon="plus"></span>اللون</button>
-            <button type="button" class="chip dashed" data-preset-group="custom"><span data-icon="plus"></span>خيار آخر</button>
+          <label class="switch"><input type="checkbox" id="f-hasOptions"><span class="slider"></span><span>هاد المنتوج عندو ألوان ولا أحجام</span></label>
+          <div id="optionsBody">
+            <div id="groupsEditor"></div>
+            <div class="chips wrap">
+              <button type="button" class="chip dashed" data-preset-group="size"><span data-icon="plus"></span>الحجم</button>
+              <button type="button" class="chip dashed" data-preset-group="color"><span data-icon="plus"></span>اللون</button>
+              <button type="button" class="chip dashed" data-preset-group="custom"><span data-icon="plus"></span>خيار آخر</button>
+            </div>
           </div>
         </fieldset>
 

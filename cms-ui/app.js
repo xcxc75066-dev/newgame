@@ -419,6 +419,7 @@
 
   // ---------------------------------------------------------------- products
   async function loadProducts() {
+    api('/stock').then((data) => { state.stock = data.stock || {}; }).catch(() => { state.stock = state.stock || {}; });
     const data = await api('/products');
     state.lists = data.lists;
     state.version = data.version;
@@ -594,7 +595,7 @@
     return {
       id: '', 'pro-id123': '', title: '', brand: 'AMANI PARFUMS', price: '', oldPrice: '',
       description: '', image: '', sections: ['popular', 'related', 'offers'], badges: [],
-      colors: [presetGroup('size')], hidden: false, addedAt: todayIso(), categories: []
+      colors: [], hidden: false, addedAt: todayIso(), categories: []
     };
   }
 
@@ -617,6 +618,7 @@
   function openEditor(list, index) {
     const isNew = index === null;
     const draft = isNew ? newProduct() : clone(state.lists[list][index]);
+    if (isNew) draft.id = 'AP' + Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
     draft.colors = draft.colors || [];
     draft.badges = draft.badges || [];
     draft.gallery = Array.isArray(draft.gallery) ? draft.gallery : [];
@@ -632,6 +634,11 @@
     $('aiOptions').replaceChildren();
     $('f-price').value = draft.price === '' ? '' : String(draft.price);
     $('f-oldPrice').value = Number(draft.oldPrice) ? String(draft.oldPrice) : '';
+    const left = (state.stock || {})[draft.id];
+    $('f-stock').value = Number.isInteger(left) ? String(left) : '';
+    state.editing.stockBefore = $('f-stock').value;
+    $('f-hasOptions').checked = draft.colors.length > 0;
+    $('optionsBody').hidden = !draft.colors.length;
     $('f-image').value = draft.image || '';
     $('f-list').value = list;
     $('f-visible').checked = !draft.hidden;
@@ -690,13 +697,13 @@
   $('aiDescribeBtn').addEventListener('click', async () => {
     const draft = state.editing.draft;
     const box = $('aiOptions');
-    if (!draft.title.trim()) { toast('كتب سمية المنتوج أولا', 'error'); $('f-title').focus(); return; }
+    if (!draft.image) { toast('زيد تصويرة للمنتوج أولا: الوصف كيتكتب من التصويرة', 'error'); return; }
     $('aiDescribeBtn').disabled = true;
     box.hidden = false;
     box.replaceChildren(h('div', { class: 'spinner small' }), h('p', { class: 'hint', text: 'كنكتبو 3 أوصاف…' }));
     try {
       const data = await api('/ai/describe', { method: 'POST', body: {
-        title: draft.title, info: draft.description || '', names: [], categories: draft.categories || []
+        image: draft.image, categories: draft.categories || []
       } });
       box.replaceChildren(h('small', { class: 'muted', text: 'ختار واحد (تقدر تبدل فيه من بعد):' }),
         ...data.options.map((option) => h('button', { type: 'button', class: 'ai-option', onclick: (e) => {
@@ -783,7 +790,7 @@
     const draft = state.editing.draft;
     const container = $('groupsEditor');
     if (!draft.colors.length) {
-      container.replaceChildren(h('p', { class: 'hint', text: 'بلا خيارات. زيد مثلاً «الحجم» إلا كان عندو أحجام بأثمنة مختلفة.' }));
+      container.replaceChildren(h('p', { class: 'hint', text: 'زيد «الحجم» ولا «اللون» من الأزرار لتحت.' }));
       return;
     }
     container.replaceChildren(...draft.colors.map((group, gi) => h('div', { class: 'group-box' },
@@ -816,6 +823,21 @@
         onclick: () => { group.options.push({ name: '', img: '', soldOut: false, priceAdd: 0 }); markDirty(); renderGroups(); } }, 'زيد خيار')
     )));
   }
+
+  // Colors / sizes are off for most products: the switch shows or removes them.
+  $('f-hasOptions').addEventListener('change', (e) => {
+    const draft = state.editing.draft;
+    if (!e.target.checked && draft.colors.length
+        && !confirm('تحيد الألوان والأحجام من هاد المنتوج؟')) {
+      e.target.checked = true;
+      return;
+    }
+    if (!e.target.checked) draft.colors = [];
+    $('optionsBody').hidden = !e.target.checked;
+    markDirty();
+    renderGroups();
+  });
+  $('f-stock').addEventListener('input', markDirty);
 
   document.querySelectorAll('[data-preset-group]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -924,6 +946,13 @@
     if (!(price > 0)) problems.push('الثمن مطلوب وخاصو يكون أكبر من 0');
     const old = draft.oldPrice === '' ? 0 : Number(draft.oldPrice);
     mark('f-oldPrice', Number.isNaN(old) || old < 0);
+    const stock = $('f-stock').value.trim();
+    if (stock && !/^\d{1,6}$/.test(stock)) {
+      $('f-stock').classList.add('invalid');
+      problems.push('المخزون خاصو يكون رقم (ولا خليه خاوي).');
+    } else {
+      $('f-stock').classList.remove('invalid');
+    }
     if (Number.isNaN(old) || old < 0) problems.push('الثمن القديم ماشي صحيح');
     mark('f-image', !draft.image);
     if (!draft.image) problems.push('زيد صورة للمنتوج');
@@ -959,6 +988,16 @@
     const button = $('editorSave');
     button.disabled = true;
     const saved = await saveLists(lists, product.hidden ? 'تم الحفظ (المنتج مخفي)' : 'تم الحفظ ✓ التغيير ظاهر فالمتجر');
+    const stock = $('f-stock').value.trim();
+    if (saved && stock !== state.editing.stockBefore) {
+      try {
+        const data = await api('/stock', { method: 'PUT', body: { id: product.id, stock } });
+        state.stock = state.stock || {};
+        if (data.stock === null) delete state.stock[product.id]; else state.stock[product.id] = data.stock;
+      } catch (error) {
+        toast('المنتج تسجل، ولكن المخزون لا: ' + error.message, 'error');
+      }
+    }
     button.disabled = false;
     if (saved) closeEditor(true);
   });
@@ -1312,13 +1351,13 @@
     const description = h('textarea', { rows: '4', dir: 'auto', maxlength: '2000', oninput: (e) => { form.description = e.target.value; } }, form.description);
     const aiBox = h('div', { class: 'ai-options', hidden: true });
     const aiButton = h('button', { type: 'button', class: 'btn secondary block', onclick: async () => {
-      if (!form.title.trim()) return toast('كتب سمية المنتوج أولا', 'error');
+      if (!form.images.length) return toast('ختار تصويرة أولا: الوصف كيتكتب من التصويرة', 'error');
       aiButton.disabled = true;
       aiBox.hidden = false;
       aiBox.replaceChildren(h('div', { class: 'spinner small' }), h('p', { class: 'hint', text: 'كنكتبو 3 أوصاف…' }));
       try {
         const data = await api('/ai/describe', { method: 'POST', body: {
-          title: form.title, info: item.description || '', names: item.names || [], categories: form.categories
+          image: form.images[0], categories: form.categories
         } });
         aiBox.replaceChildren(h('small', { class: 'muted', text: 'ختار واحد (تقدر تبدل فيه من بعد):' }),
           ...data.options.map((option) => h('button', { type: 'button', class: 'ai-option', onclick: () => {
@@ -1332,7 +1371,7 @@
       } finally {
         aiButton.disabled = false;
       }
-    } }, icon('spark'), 'اقترح 3 أوصاف (AI)');
+    } }, icon('spark'), 'اقترح 3 أوصاف من التصويرة (AI)');
 
     const addBtn = h('button', { type: 'button', class: 'btn primary block', onclick: (e) => decide(false, e.currentTarget) }, icon('check'), 'زيد للمتجر');
     const hideBtn = h('button', { type: 'button', class: 'btn ghost block', onclick: (e) => decide(true, e.currentTarget) }, icon('eyeOff'), 'زيد مخفي');

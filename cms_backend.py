@@ -839,11 +839,73 @@ class VideoProcessor:
 
 
 # --------------------------------------------------------------------- service
+MAX_STOCK = 100000
+
+
+def clean_stock(value: Any) -> int | None:
+    """Units left: a whole number 0..100000, or None (stock not followed)."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        number = int(str(value).strip())
+    except ValueError:
+        raise CmsError(400, "المخزون خاصو يكون رقم (ولا خليه خاوي).") from None
+    if number < 0 or number > MAX_STOCK:
+        raise CmsError(400, f"المخزون خاصو يكون بين 0 و {MAX_STOCK}.")
+    return number
+
+
+class StockStore:
+    """Units left per product ({product id: n}), kept apart from the product files so
+    an order never changes the products the CMS is editing (no "edited elsewhere")."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = threading.Lock()
+
+    def all(self) -> dict[str, int]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {str(k): int(v) for k, v in data.items() if isinstance(v, int) and v >= 0} if isinstance(data, dict) else {}
+
+    def _save(self, data: dict[str, int]) -> None:
+        _atomic_write(self.path, json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+
+    def set(self, product_id: str, value: Any) -> int | None:
+        product_id = str(product_id or "").strip()
+        if not product_id or len(product_id) > 120:
+            raise CmsError(400, "منتوج غير معروف.")
+        number = clean_stock(value)
+        with self._lock:
+            data = self.all()
+            if number is None:
+                data.pop(product_id, None)
+            else:
+                data[product_id] = number
+            self._save(data)
+        return number
+
+    def change(self, deltas: dict[str, int]) -> None:
+        """Adds (or removes, with negative numbers) units; only for followed products."""
+        with self._lock:
+            data = self.all()
+            touched = False
+            for product_id, delta in deltas.items():
+                if product_id in data and delta:
+                    data[product_id] = max(0, min(MAX_STOCK, data[product_id] + int(delta)))
+                    touched = True
+            if touched:
+                self._save(data)
+
+
 class CmsService:
     def __init__(self, database_path: Path, data_dir: Path, seed_products_dir: Path) -> None:
         self.limiter = LoginLimiter()
         self.sessions = SessionStore(database_path)
         self.content = ContentStore(data_dir, seed_products_dir)
+        self.stock = StockStore(data_dir / "content" / "stock.json")
         self.videos = VideoProcessor(self.content.uploads_dir)
 
     @staticmethod

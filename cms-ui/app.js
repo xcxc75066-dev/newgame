@@ -289,21 +289,26 @@
     : location.origin);
   $('shopLink').href = `${shopBase()}/`;
 
-  // 📵 the owner's own device: the shop opens once with a one-time code and remembers it
-  async function ownerLink(on) {
+  // 📵 the owner's own device: the shop opens once with a one-time code and remembers it.
+  // The switch remembers its position on this device.
+  const NOT_ME_KEY = 'amani-cms-not-me';
+  const notMeSwitch = $('notMeSwitch');
+  try { notMeSwitch.checked = localStorage.getItem(NOT_ME_KEY) === '1'; } catch (_) { /* private mode */ }
+  notMeSwitch.addEventListener('change', async () => {
+    const on = notMeSwitch.checked;
     const tab = window.open('', '_blank');  // opened now, while the tap still counts
     try {
       const data = await api('/me', { method: 'POST', body: { on } });
       const url = `${shopBase()}/?me=${data.code}`;
       if (tab) tab.location.href = url; else window.location.href = url;
+      try { localStorage.setItem(NOT_ME_KEY, on ? '1' : '0'); } catch (_) { /* private mode */ }
       toast(on ? 'تحل المتجر: هاد الجهاز ما بقاش كيتحسب ✓' : 'تحل المتجر: هاد الجهاز رجع كيتحسب ✓', 'success');
     } catch (error) {
       if (tab) tab.close();
+      notMeSwitch.checked = !on;
       toast(error.message, 'error');
     }
-  }
-  $('notMeBtn').addEventListener('click', () => ownerLink(true));
-  $('countMeBtn').addEventListener('click', () => ownerLink(false));
+  });
   $('shopLink').querySelector('small').textContent = shopBase().replace(/^https?:\/\//, '');
 
   // ---------------------------------------------------------------- navigation

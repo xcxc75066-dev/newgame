@@ -300,6 +300,8 @@ input[type=date] { color-scheme: inherit; }
 .menu-item b { font-size: 15px; }
 .menu-item small { color: var(--muted); font-size: 13px; }
 .menu-item.danger > span { background: var(--danger-soft); color: var(--danger); }
+.menu-item.me-switch { cursor: default; }
+.menu-item.me-switch .switch { min-height: 0; }
 .menu-item.danger b { color: var(--danger); }
 
 /* editor & sheets */

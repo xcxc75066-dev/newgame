@@ -283,8 +283,8 @@
     applyTheme(next);
   });
 
-  // On admin5575.<domain> (or admin.<domain>), the "shop" link goes to the main site.
-  const ADMIN_PREFIX = /^admin[0-9]*\./;
+  // On admin5575sh.<domain> (or any admin….<domain>), the "shop" link goes to the main site.
+  const ADMIN_PREFIX = /^admin[a-z0-9-]*\./;
   const shopBase = () => (ADMIN_PREFIX.test(location.hostname)
     ? `${location.protocol}//${location.hostname.replace(ADMIN_PREFIX, '')}`
     : location.origin);

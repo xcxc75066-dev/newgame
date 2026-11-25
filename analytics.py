@@ -218,8 +218,43 @@ class Analytics:
                 CREATE INDEX IF NOT EXISTS idx_events_product ON events(product, type);
                 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session);
                 CREATE TABLE IF NOT EXISTS report_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS owner_devices (visitor TEXT PRIMARY KEY, added REAL NOT NULL);
                 """
             )
+            self._owners = {row[0] for row in connection.execute("SELECT visitor FROM owner_devices")}
+        self._owner_codes: dict[str, tuple[bool, float]] = {}
+
+    # ------------------------------------------------- the owner's own devices
+    def owner_code(self, on: bool) -> str:
+        """A one-time code (10 minutes) the CMS puts in a shop link: /?me=<code>."""
+        code = secrets.token_hex(12)
+        now = time.time()
+        with self._lock:
+            self._owner_codes = {c: v for c, v in self._owner_codes.items() if v[1] > now}
+            self._owner_codes[code] = (bool(on), now + 600)
+        return code
+
+    def use_owner_code(self, code: Any, visitor: Any) -> dict[str, Any] | None:
+        """The shop opened with ?me=<code>: this browser stops (or starts again) being counted.
+        Stopping also removes the visits it made before."""
+        code, visitor = str(code or ""), str(visitor or "")
+        if not ID_PATTERN.fullmatch(visitor):
+            return None
+        with self._lock:
+            entry = self._owner_codes.pop(code, None)
+        if not entry or entry[1] < time.time():
+            return None
+        on = entry[0]
+        removed = 0
+        with self._connect() as connection:
+            if on:
+                connection.execute("INSERT OR IGNORE INTO owner_devices (visitor, added) VALUES (?, ?)", (visitor, time.time()))
+                removed = connection.execute("DELETE FROM events WHERE visitor = ?", (visitor,)).rowcount
+            else:
+                connection.execute("DELETE FROM owner_devices WHERE visitor = ?", (visitor,))
+        with self._lock:
+            (self._owners.add if on else self._owners.discard)(visitor)
+        return {"ignored": on, "removed": removed}
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=15)
@@ -243,6 +278,8 @@ class Analytics:
         session = str(payload.get("s") or "")
         if kind not in EVENT_TYPES or not ID_PATTERN.fullmatch(visitor) or not ID_PATTERN.fullmatch(session):
             return False
+        if visitor in self._owners:
+            return False  # the shop owner's own device
         product = str(payload.get("product") or "").strip()[:160]
         if kind in PRODUCT_EVENTS and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", product):
             return False

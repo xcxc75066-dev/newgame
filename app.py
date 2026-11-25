@@ -1164,6 +1164,11 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                     "types": cms.content.types(),
                 })
                 return
+            if path == "/api/cms/me" and method == "POST":
+                # "📵 ما تحسبش هاد الجهاز": a one-time code for a shop link (/?me=<code>)
+                on = bool(self._read_json().get("on", True))
+                self._send_cms(HTTPStatus.OK, {"ok": True, "code": self.server.analytics.owner_code(on)})
+                return
             if path == "/api/cms/stock" and method == "GET":
                 self._send_cms(HTTPStatus.OK, {"ok": True, "stock": cms.stock.all()})
                 return
@@ -1561,6 +1566,18 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.NO_CONTENT)
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
+            return
+        if path == "/api/me":
+            # The shop opened from the CMS button: this browser is (or is no more) the owner's.
+            try:
+                payload = self._read_json()
+                result = self.server.analytics.use_owner_code(payload.get("code"), payload.get("v"))
+            except (OrderValidationError, sqlite3.Error):
+                result = None
+            if result is None:
+                self._send_error(HTTPStatus.BAD_REQUEST, "This link has expired. Open it again from the CMS.")
+            else:
+                self._send_json({"ok": True, **result})
             return
         if path == "/api/intake/product":
             self._handle_intake()

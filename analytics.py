@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import secrets
+import string
 import sqlite3
 import threading
 import time
@@ -48,6 +49,9 @@ LONG_LOOK_SECONDS = 20
 SOURCES = frozenset({"facebook", "instagram", "whatsapp", "google", "tiktok", "youtube", "snapchat", "direct", "other"})
 DEVICES = frozenset({"mobile", "tablet", "desktop"})
 ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+# The owner's secret key: 20 random letters and numbers, given only to the browser that turned the switch on
+OWNER_TOKEN_LETTERS = string.ascii_letters + string.digits
+OWNER_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9]{20}$")
 CAMPAIGN_PATTERN = re.compile(r"^[\w .+-]{1,60}$", re.UNICODE)
 SIX_HOUR_SLOTS = (0, 6, 12, 18)
 DAILY_REPORT_HOUR = 21
@@ -219,9 +223,11 @@ class Analytics:
                 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session);
                 CREATE TABLE IF NOT EXISTS report_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS owner_devices (visitor TEXT PRIMARY KEY, added REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS owner_tokens (token TEXT PRIMARY KEY, added REAL NOT NULL);
                 """
             )
             self._owners = {row[0] for row in connection.execute("SELECT visitor FROM owner_devices")}
+            self._tokens = {row[0] for row in connection.execute("SELECT token FROM owner_tokens")}
         self._owner_codes: dict[str, tuple[bool, float]] = {}
 
     # ------------------------------------------------- the owner's own devices
@@ -234,10 +240,13 @@ class Analytics:
             self._owner_codes[code] = (bool(on), now + 600)
         return code
 
-    def use_owner_code(self, code: Any, visitor: Any) -> dict[str, Any] | None:
-        """The shop opened with ?me=<code>: this browser stops (or starts again) being counted.
-        Stopping also removes the visits it made before (its statistics go back to zero)."""
-        code, visitor = str(code or ""), str(visitor or "")
+    def use_owner_code(self, code: Any, visitor: Any, token: Any = "") -> dict[str, Any] | None:
+        """The shop opened with ?me=<code>.
+        On: this browser gets its own secret key (20 random letters/numbers), kept in the
+        browser and here. Everything sent with that key (clicks, visits, orders) is dropped
+        quietly, and the visits the browser made before are removed.
+        Off: the key the browser sends back is forgotten."""
+        code, visitor, token = str(code or ""), str(visitor or ""), str(token or "")
         if not ID_PATTERN.fullmatch(visitor):
             return None
         with self._lock:
@@ -248,19 +257,29 @@ class Analytics:
         removed = 0
         with self._connect() as connection:
             if on:
-                connection.execute("INSERT OR IGNORE INTO owner_devices (visitor, added) VALUES (?, ?)", (visitor, time.time()))
+                token = "".join(secrets.choice(OWNER_TOKEN_LETTERS) for _ in range(20))
+                connection.execute("INSERT INTO owner_tokens (token, added) VALUES (?, ?)", (token, time.time()))
                 removed = connection.execute("DELETE FROM events WHERE visitor = ?", (visitor,)).rowcount
             else:
+                if OWNER_TOKEN_PATTERN.fullmatch(token):
+                    connection.execute("DELETE FROM owner_tokens WHERE token = ?", (token,))
                 connection.execute("DELETE FROM owner_devices WHERE visitor = ?", (visitor,))
         with self._lock:
-            (self._owners.add if on else self._owners.discard)(visitor)
-        with self._lock:
+            if on:
+                self._tokens.add(token)
+            else:
+                self._tokens.discard(token)
+                self._owners.discard(visitor)
             self._rank_cache = (0.0, [])
-        return {"ignored": on, "removed": removed}
+        return {"ignored": True, "token": token, "removed": removed} if on else {"ignored": False}
+
+    def is_owner(self, token: Any) -> bool:
+        """True when a request carries the owner's secret key (sent only by the owner's browser)."""
+        token = str(token or "")
+        return bool(OWNER_TOKEN_PATTERN.fullmatch(token)) and token in self._tokens
 
     def reset(self) -> int:
-        """🗑 Start the statistics from zero: every visit, view and click is removed.
-        Orders are not touched (a cancelled order is not counted anyway)."""
+        """🗑 Start the statistics from zero: every visit, view and click is removed."""
         with self._connect() as connection:
             removed = connection.execute("DELETE FROM events").rowcount
         with self._lock:
@@ -290,7 +309,7 @@ class Analytics:
         session = str(payload.get("s") or "")
         if kind not in EVENT_TYPES or not ID_PATTERN.fullmatch(visitor) or not ID_PATTERN.fullmatch(session):
             return False
-        if visitor in self._owners:
+        if visitor in self._owners or self.is_owner(payload.get("me")):
             return False  # the shop owner's own device
         product = str(payload.get("product") or "").strip()[:160]
         if kind in PRODUCT_EVENTS and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", product):

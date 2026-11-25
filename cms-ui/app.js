@@ -283,9 +283,10 @@
     applyTheme(next);
   });
 
-  // On admin.<domain>, the "shop" link goes to the main site.
-  const shopBase = () => (location.hostname.startsWith('admin.')
-    ? `${location.protocol}//${location.hostname.slice('admin.'.length)}`
+  // On admin5575.<domain> (or admin.<domain>), the "shop" link goes to the main site.
+  const ADMIN_PREFIX = /^admin[0-9]*\./;
+  const shopBase = () => (ADMIN_PREFIX.test(location.hostname)
+    ? `${location.protocol}//${location.hostname.replace(ADMIN_PREFIX, '')}`
     : location.origin);
   $('shopLink').href = `${shopBase()}/`;
 
@@ -302,7 +303,7 @@
       const url = `${shopBase()}/?me=${data.code}`;
       if (tab) tab.location.href = url; else window.location.href = url;
       try { localStorage.setItem(NOT_ME_KEY, on ? '1' : '0'); } catch (_) { /* private mode */ }
-      toast(on ? 'تحل المتجر: هاد الجهاز ما بقاش كيتحسب ✓' : 'تحل المتجر: هاد الجهاز رجع كيتحسب ✓', 'success');
+      toast(on ? 'تحل المتجر: هاد المتصفح خدا كود سري، ما بقاش كيتحسب ✓' : 'تحل المتجر: الكود السري تمسح، رجع كيتحسب ✓', 'success');
     } catch (error) {
       if (tab) tab.close();
       notMeSwitch.checked = !on;
@@ -1934,12 +1935,14 @@
     return h('section', { class: 'stats-card' }, h('h3', {}, icon(iconName), title), ...children);
   }
 
-  // 🗑 statistics from zero (visits, views, clicks); orders stay
+  // 🗑 the whole site from zero: statistics AND orders
   $('resetStatsBtn').addEventListener('click', async () => {
-    if (!confirm('صفّر الإحصائيات؟\nكيتمسحو كاع الزيارات والمشاهدات والكليكات، وما كيرجعوش.\nالطلبات ما كيتقاسوش (الطلب الملغي ما كيتحسبش).')) return;
+    const typed = prompt('⚠️ صفّر الموقع كامل؟\nكيتمسحو كاع الإحصائيات (الزيارات، المشاهدات، الكليكات) وكاع الطلبات، وما كيرجعوش.\nالمنتوجات والستوك ما كيتقاسوش.\n\nباش تأكد، كتب: صفر');
+    if (typed === null) return;
+    if (typed.trim() !== 'صفر') { toast('ما تصفر والو: خاصك تكتب «صفر»', 'error'); return; }
     try {
       const data = await api('/stats/reset', { method: 'POST', body: {} });
-      toast(`تصفرات الإحصائيات ✓ (${data.removed})`, 'success');
+      toast(`تصفر الموقع ✓ (${data.removed} حركة، ${data.orders} طلب)`, 'success');
       loadStats();
     } catch (error) { toast(error.message, 'error'); }
   });

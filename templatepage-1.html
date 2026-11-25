@@ -273,6 +273,14 @@
             line-height: 1;
         }
 
+        /* Logo: AMANI + the Moroccan star, a red-green line, BOUTIQUE MAROC */
+        @font-face { font-family: 'Alexandria'; font-weight: 600; font-display: swap; src: url('/assets/fonts/alexandria-latin-600-normal.woff2') format('woff2'); unicode-range: U+0000-024F; }
+        @font-face { font-family: 'Alexandria'; font-weight: 700; font-display: swap; src: url('/assets/fonts/alexandria-latin-700-normal.woff2') format('woff2'); unicode-range: U+0000-024F; }
+        .brand-logo { display: block; height: 50px; width: auto; font-family: 'Alexandria', 'Montserrat', sans-serif; }
+        .brand-logo .logo-word { fill: var(--primary-green); }
+        .brand-logo .logo-sub { fill: var(--gold-accent); }
+        body.dark-mode .brand-logo .logo-word { fill: #e5e7eb; }
+
         .logo-title-wrap {
             display: flex;
             align-items: center;
@@ -1637,7 +1645,12 @@
         .qm-modal {
             display: none;
             position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
+            left: 0; bottom: 0; width: 100%;
+            /* like the cart: starts a little lower, the green bar stays visible above */
+            height: 95vh;
+            height: 95dvh;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.15);
             background: var(--light-bg);
             z-index: 1005;
             align-items: flex-start;
@@ -2469,12 +2482,8 @@
 
     <!-- Header (Amani Market + Cart Icon) -->
     <header>
-        <a href="#" class="logo">
-            <div class="logo-title-wrap notranslate">
-                <i class="fa-solid fa-cart-shopping"></i>
-                <span>AMANI MARKET</span>
-            </div>
-            <span>ENTERTAINMENT PRODUCTS</span>
+        <a href="/" class="logo notranslate" aria-label="Amani Boutique Maroc">
+            <svg class="brand-logo" viewBox="0 0 148 56" role="img" aria-label="Amani Boutique Maroc" style="direction:ltr"><text x="2" y="28" class="logo-word" font-size="27" font-weight="700" textLength="116" lengthAdjust="spacingAndGlyphs">AMANI</text><rect x="124" y="7" width="20" height="20" rx="4" fill="#C1272D"/><path d="M134.00 11.00 L138.00 23.30 L127.53 15.70 L140.47 15.70 L130.00 23.30 Z" fill="none" stroke="#006233" stroke-width="1.6" stroke-linejoin="miter"/><rect x="2" y="35" width="71" height="3" fill="#C1272D"/><rect x="73" y="35" width="71" height="3" fill="#006233"/><text x="2" y="52" class="logo-sub" font-size="9.2" font-weight="600" textLength="141" lengthAdjust="spacing">BOUTIQUE MAROC</text></svg>
         </a>
 
         <div class="header-icons">
@@ -4634,6 +4643,8 @@
             updateQmTotalDisplay();
 
             document.getElementById('quickSelectModal').classList.add('active');
+            const dim = document.getElementById('overlay'); // the page behind is dimmed, like the cart
+            if (dim) { dim.style.display = 'block'; setTimeout(() => { dim.style.opacity = '1'; }, 10); }
             document.body.style.overflow = 'hidden';
         }
 
@@ -4834,6 +4845,12 @@
             stopQmVideo();
             document.getElementById('quickSelectModal').classList.remove('active');
             document.body.style.overflow = '';
+            const dim = document.getElementById('overlay');
+            const sideOpen = () => document.querySelector('#navSidebar.active, #cartSidebar.active');
+            if (dim && !sideOpen()) {
+                dim.style.opacity = '0';
+                setTimeout(() => { if (!sideOpen()) dim.style.display = 'none'; }, 300);
+            }
             if (options.clearProductRoute !== false && getDirectProductIdFromPath()) {
                 window.history.pushState({}, '', '/');
                 syncProductRouteChrome();

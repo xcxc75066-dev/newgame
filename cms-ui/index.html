@@ -102,6 +102,7 @@
         <div class="stats-actions">
           <button class="btn secondary" id="downloadCsvBtn" type="button"><span data-icon="download"></span>تحميل CSV (Excel)</button>
           <button class="btn ghost" id="sendReport6hBtn" type="button"><span data-icon="send"></span>تقرير 6 ساعات لـ Telegram</button>
+          <button class="btn danger" id="resetStatsBtn" type="button"><span data-icon="trash"></span>صفّر الإحصائيات</button>
           <button class="btn ghost" id="sendReportDailyBtn" type="button"><span data-icon="send"></span>التقرير اليومي لـ Telegram</button>
         </div>
       </section>
@@ -115,8 +116,11 @@
           <button type="button" class="menu-item" data-go="types"><span data-icon="tag"></span><b>🏷 الأنواع</b><small>أنواع المنتوجات (للمنتوجات المشابهة)</small></button>
           <button type="button" class="menu-item" data-go="categories"><span data-icon="folder"></span><b>التصنيفات</b><small>الأقسام اللي فالمنيو ديال المتجر</small></button>
           <button type="button" class="menu-item" data-go="history"><span data-icon="history"></span><b>السجل</b><small>رجوع لنسخة قديمة من المنتجات</small></button>
-          <button type="button" class="menu-item" id="notMeBtn"><span data-icon="eyeOff"></span><b>📵 ما تحسبش هاد الجهاز</b><small>الزيارات ديالك للمتجر ما تدخلش فالإحصائيات</small></button>
-          <button type="button" class="menu-item" id="countMeBtn"><span data-icon="eye"></span><b>✅ رجع احسبني</b><small>باش تجرب الإحصائيات من هاد الجهاز</small></button>
+          <div class="menu-item me-switch">
+            <span data-icon="eyeOff"></span>
+            <label class="switch"><input type="checkbox" id="notMeSwitch"><span class="slider"></span><b>📵 ما تحسبش هاد الجهاز</b></label>
+            <small id="notMeHint">الزيارات ديالك للمتجر ما تدخلش فالإحصائيات، والقديمة ديال هاد الجهاز كتمسح</small>
+          </div>
           <a class="menu-item" id="shopLink" href="/" target="_blank" rel="noopener"><span data-icon="external"></span><b>فتح المتجر</b><small>boutiqueamani-maroc.com</small></a>
           <button type="button" class="menu-item" id="themeToggle"><span data-icon="moon" id="themeIcon"></span><b id="themeLabel">الوضع الفاتح</b><small>بدّل بين الليل والنهار</small></button>
           <button type="button" class="menu-item danger" id="logoutBtn"><span data-icon="logout"></span><b>خروج</b><small>سد الجلسة على هاد الجهاز</small></button>

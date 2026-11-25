@@ -236,7 +236,7 @@ class Analytics:
 
     def use_owner_code(self, code: Any, visitor: Any) -> dict[str, Any] | None:
         """The shop opened with ?me=<code>: this browser stops (or starts again) being counted.
-        The statistics already recorded are kept as they are."""
+        Stopping also removes the visits it made before (its statistics go back to zero)."""
         code, visitor = str(code or ""), str(visitor or "")
         if not ID_PATTERN.fullmatch(visitor):
             return None
@@ -245,14 +245,28 @@ class Analytics:
         if not entry or entry[1] < time.time():
             return None
         on = entry[0]
+        removed = 0
         with self._connect() as connection:
             if on:
                 connection.execute("INSERT OR IGNORE INTO owner_devices (visitor, added) VALUES (?, ?)", (visitor, time.time()))
+                removed = connection.execute("DELETE FROM events WHERE visitor = ?", (visitor,)).rowcount
             else:
                 connection.execute("DELETE FROM owner_devices WHERE visitor = ?", (visitor,))
         with self._lock:
             (self._owners.add if on else self._owners.discard)(visitor)
-        return {"ignored": on}
+        with self._lock:
+            self._rank_cache = (0.0, [])
+        return {"ignored": on, "removed": removed}
+
+    def reset(self) -> int:
+        """🗑 Start the statistics from zero: every visit, view and click is removed.
+        Orders are not touched (a cancelled order is not counted anyway)."""
+        with self._connect() as connection:
+            removed = connection.execute("DELETE FROM events").rowcount
+        with self._lock:
+            self._rank_cache = (0.0, [])
+            self._recent_views.clear()
+        return removed
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=15)

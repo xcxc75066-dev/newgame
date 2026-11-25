@@ -1934,6 +1934,16 @@
     return h('section', { class: 'stats-card' }, h('h3', {}, icon(iconName), title), ...children);
   }
 
+  // 🗑 statistics from zero (visits, views, clicks); orders stay
+  $('resetStatsBtn').addEventListener('click', async () => {
+    if (!confirm('صفّر الإحصائيات؟\nكيتمسحو كاع الزيارات والمشاهدات والكليكات، وما كيرجعوش.\nالطلبات ما كيتقاسوش (الطلب الملغي ما كيتحسبش).')) return;
+    try {
+      const data = await api('/stats/reset', { method: 'POST', body: {} });
+      toast(`تصفرات الإحصائيات ✓ (${data.removed})`, 'success');
+      loadStats();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+
   async function loadStats() {
     const body = $('statsBody');
     body.replaceChildren(h('div', { class: 'spinner' }));

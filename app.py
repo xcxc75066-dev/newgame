@@ -1164,6 +1164,10 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                     "types": cms.content.types(),
                 })
                 return
+            if path == "/api/cms/stats/reset" and method == "POST":
+                self._read_json()  # read the (empty) body so the next request on this connection is clean
+                self._send_cms(HTTPStatus.OK, {"ok": True, "removed": self.server.analytics.reset()})
+                return
             if path == "/api/cms/me" and method == "POST":
                 # "📵 ما تحسبش هاد الجهاز": a one-time code for a shop link (/?me=<code>)
                 on = bool(self._read_json().get("on", True))

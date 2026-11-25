@@ -470,7 +470,7 @@ class ServerConfig:
     allowed_origins: tuple[str, ...]
     behind_cloudflare: bool = False
     max_body_bytes: int = MAX_JSON_BYTES
-    # When set (e.g. admin.boutiqueamani-maroc.com) the CMS lives only on that
+    # When set (e.g. admin5575.boutiqueamani-maroc.com) the CMS lives only on that
     # host and the old /mycmseditor address is closed.
     admin_host: str = ""
 
@@ -629,6 +629,12 @@ class OrderStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    def delete_all_orders(self) -> int:
+        """🗑 Start from zero: every order (and its products) is removed. The stock is not changed."""
+        with self._connect() as connection:
+            connection.execute("DELETE FROM order_items")
+            return connection.execute("DELETE FROM orders").rowcount
 
     def create_order(self, payload: dict[str, Any], client_ip: str) -> dict[str, Any]:
         order = validate_order_payload(payload, self.catalog)
@@ -1166,7 +1172,9 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/cms/stats/reset" and method == "POST":
                 self._read_json()  # read the (empty) body so the next request on this connection is clean
-                self._send_cms(HTTPStatus.OK, {"ok": True, "removed": self.server.analytics.reset()})
+                removed = self.server.analytics.reset()
+                orders = self.server.store.delete_all_orders()
+                self._send_cms(HTTPStatus.OK, {"ok": True, "removed": removed, "orders": orders})
                 return
             if path == "/api/cms/me" and method == "POST":
                 # "📵 ما تحسبش هاد الجهاز": a one-time code for a shop link (/?me=<code>)
@@ -1575,7 +1583,7 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             # The shop opened from the CMS button: this browser is (or is no more) the owner's.
             try:
                 payload = self._read_json()
-                result = self.server.analytics.use_owner_code(payload.get("code"), payload.get("v"))
+                result = self.server.analytics.use_owner_code(payload.get("code"), payload.get("v"), payload.get("me"))
             except (OrderValidationError, sqlite3.Error):
                 result = None
             if result is None:
@@ -1596,6 +1604,21 @@ class AmaniRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._read_json()
+            if self.server.analytics.is_owner(payload.get("me")):
+                # The owner's own browser (switch on in the CMS): answer like a real order,
+                # but save nothing, send no Telegram message and leave the stock as it is.
+                validate_order_payload(payload, self.server.store.catalog)
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": "Order received successfully.",
+                        "order_id": str(uuid.uuid4()),
+                        "order_number": OrderStore._order_number(),
+                        "status": "pending",
+                    },
+                    HTTPStatus.CREATED,
+                )
+                return
             order = self.server.store.create_order(payload, self._get_client_ip())
             LOGGER.info(
                 "order_received order_number=%s channel=%s total=%s",

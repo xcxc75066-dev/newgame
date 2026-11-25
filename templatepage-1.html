@@ -3713,14 +3713,19 @@
             return { v: visitor, s: session.id, isNew };
         }
 
-        // The owner's own phone/computer (set from the CMS: 📵) is never counted.
-        const isOwnerDevice = () => trackStorage('amani-me') === '1';
+        // The owner's own browser (switch on in the CMS: 📵) keeps a secret key of 20
+        // letters/numbers. It goes with every click and order: the server drops them quietly.
+        const ownerKey = () => {
+            const key = trackStorage('amani-me') || '';
+            return /^[A-Za-z0-9]{20}$/.test(key) ? key : '';
+        };
 
         function trackEvent(type, extra = {}) {
-            if (isOwnerDevice()) return;
             try {
                 const ids = trackIds();
+                const me = ownerKey();
                 const send = (payload) => {
+                    if (me) payload.me = me;
                     const body = JSON.stringify(payload);
                     if (navigator.sendBeacon && navigator.sendBeacon('/api/t', new Blob([body], { type: 'application/json' }))) return;
                     fetch('/api/t', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
@@ -3741,11 +3746,11 @@
             url.searchParams.delete('me');
             window.history.replaceState({}, '', url.pathname + url.search + url.hash);
             fetch('/api/me', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code, v: trackIds().v }) })
+                body: JSON.stringify({ code, v: trackIds().v, me: ownerKey() }) })
                 .then(response => response.ok ? response.json() : Promise.reject(response))
                 .then(data => {
-                    if (data.ignored) {
-                        trackStorage('amani-me', '1');
+                    if (data.ignored && /^[A-Za-z0-9]{20}$/.test(data.token || '')) {
+                        trackStorage('amani-me', data.token);
                         showToast('✅ This device is no longer counted in the statistics');
                     } else {
                         try { window.localStorage.removeItem('amani-me'); } catch (_) { /* ignore */ }
@@ -5356,7 +5361,8 @@
                 customer: { name, phone, address },
                 items,
                 total: Number(total.toFixed(2)),
-                tracking: trackingIdsForOrder()
+                tracking: trackingIdsForOrder(),
+                ...(ownerKey() ? { me: ownerKey() } : {})
             };
         }
 

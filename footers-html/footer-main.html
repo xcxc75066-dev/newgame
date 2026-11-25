@@ -106,7 +106,7 @@
     }
     .af-bottom {
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
@@ -115,18 +115,6 @@
       color: var(--af-muted);
       font-size: 13px;
     }
-    .af-languages { display: flex; gap: 8px; }
-    .af-languages button {
-      border: 1px solid var(--af-line);
-      background: transparent;
-      color: var(--af-text);
-      border-radius: 999px;
-      padding: 6px 12px;
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .af-languages button.is-active { background: var(--af-accent); border-color: var(--af-accent); color: #ffffff; }
     @media (max-width: 992px) {
       .af-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
     }
@@ -186,19 +174,14 @@
       </div>
 
       <ul class="af-policies">
-        <li><a href="/policies/privacy.html">Privacy Policy</a></li>
-        <li><a href="/policies/terms.html">Terms of Sale</a></li>
-        <li><a href="/policies/returns.html">Returns &amp; Refunds</a></li>
-        <li><a href="/policies/shipping.html">Shipping &amp; Payment</a></li>
+        <li><a href="#" data-policy="privacy">Privacy Policy</a></li>
+        <li><a href="#" data-policy="terms">Terms of Sale</a></li>
+        <li><a href="#" data-policy="returns">Returns &amp; Refunds</a></li>
+        <li><a href="#" data-policy="shipping">Shipping &amp; Payment</a></li>
       </ul>
 
       <div class="af-bottom">
         <p>&copy; 2026 <span class="notranslate">Amani Market</span> · Morocco</p>
-        <div class="af-languages notranslate" aria-label="Language">
-          <button type="button" data-lang="en">English</button>
-          <button type="button" data-lang="fr">Français</button>
-          <button type="button" data-lang="ar">العربية</button>
-        </div>
       </div>
     </div>
   </footer>

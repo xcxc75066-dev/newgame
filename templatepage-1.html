@@ -87,6 +87,23 @@
         .qm-stock-note svg { width: 18px; height: 18px; flex-shrink: 0; }
         .qm-submit-btn.is-sold-out { opacity: .55; cursor: not-allowed; }
         .cart-item-color:empty, .cart-detail-item-variants:empty { display: none; }
+        /* Policies (privacy, terms, returns, shipping): opened from the footer, inside the shop */
+        .policy-panel { position: fixed; inset: 0; z-index: 4000; background: var(--light-bg); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        .policy-panel[hidden] { display: none; }
+        /* its own direction (the shop keeps "notranslate" parts left-to-right in Arabic) */
+        html .policy-panel[dir="rtl"] { direction: rtl; unicode-bidi: normal; }
+        html .policy-panel[dir="ltr"] { direction: ltr; unicode-bidi: normal; }
+        .policy-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; background: var(--primary-green); }
+        .policy-head h2 { margin: 0; font-size: 1.05rem; color: #ffffff; }
+        .policy-close { flex-shrink: 0; width: 38px; height: 38px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.16); color: #ffffff; font-size: 1.4rem; line-height: 1; cursor: pointer; }
+        .policy-body { max-width: 720px; margin: 0 auto; padding: 18px 16px 48px; display: grid; gap: 12px; }
+        .policy-updated { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
+        .policy-part { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 14px 16px; }
+        .policy-part h3 { margin: 0 0 6px; font-size: 1rem; color: var(--text-dark); }
+        .policy-part p { margin: 0; font-size: 0.95rem; line-height: 1.8; color: var(--text-dark); }
+        .policy-contact { border-color: var(--gold-accent); }
+        .policy-contact a { color: var(--primary-green); font-weight: 700; }
+        body.dark-mode .policy-contact a { color: var(--gold-accent); }
         /* the scrolling announcement keeps moving the same way in Arabic */
         html[dir="rtl"] .announcement-bar,
         html[dir="rtl"] .announcement-track { direction: ltr; } /* the bar too, or the text runs out and leaves it empty */
@@ -1255,29 +1272,6 @@
         .bg-instagram { background: linear-gradient(135deg, #f58529, #dd2a7b, #8134af); }
         .bg-language { background-color: #c5a059; }
         .bg-theme { background-color: #334155; }
-        .nav-social .nav-languages {
-            flex-basis: 100%;
-            display: flex;
-            justify-content: center;
-            gap: 8px;
-        }
-        .nav-social .nav-languages button {
-            width: auto;
-            height: 34px;
-            min-width: 48px;
-            padding: 0 14px;
-            border-radius: 999px;
-            border: 1px solid var(--border-color);
-            background: transparent;
-            color: var(--text-dark);
-            font-size: 0.85rem;
-            font-weight: 700;
-        }
-        .nav-social .nav-languages button.is-active {
-            background: var(--primary-green);
-            border-color: var(--primary-green);
-            color: #ffffff;
-        }
         /* Google Translate: hide its own bar, tooltips and highlights */
         body > .skiptranslate,
         iframe.skiptranslate,
@@ -2348,6 +2342,15 @@
     </div>
 
     <!-- 2. Quick Selection Full Page Modal -->
+    <!-- Policies, opened from the footer links (data-policy) -->
+    <div class="policy-panel notranslate" id="policyPanel" hidden role="dialog" aria-modal="true" aria-labelledby="policyTitle">
+        <div class="policy-head">
+            <h2 id="policyTitle"></h2>
+            <button type="button" class="policy-close" id="policyClose" aria-label="Close">&times;</button>
+        </div>
+        <div class="policy-body" id="policyBody"></div>
+    </div>
+
     <div class="qm-modal" id="quickSelectModal">
         <div class="qm-modal-card">
             <i class="fa-solid fa-xmark qm-close-btn" onclick="closeQuickSelectModal()"></i>
@@ -4987,6 +4990,95 @@
         }
 
         loadSiteFooter();
+
+        // --- POLICIES: privacy, terms, returns, shipping (footer links with data-policy) ---
+        // Shown in the visitor's language. "Last updated" moves forward by itself every
+        // two months, one day later each time: 4 Aug 2026, 5 Oct, 6 Dec, 7 Feb...
+        const POLICIES = {"privacy": {"ar": {"title": "سياسة الخصوصية", "parts": [["خصوصيتك تهمنا", "نحترم خصوصيتك ونحافظ على معلوماتك، وفقاً للقانون المغربي رقم 09-08 المتعلق بحماية المعطيات الشخصية."], ["ما نطلبه منك", "نطلب فقط المعلومات اللازمة لإيصال طلبك: الاسم، رقم الهاتف والعنوان."], ["كيف نستعملها", "لتأكيد طلبك وتوصيله إليك، وللتواصل معك بخصوصه عند الحاجة."], ["معلوماتك في أمان", "لا نبيع معلوماتك ولا نؤجرها لأي جهة، ولا نشاركها إلا بالقدر اللازم لتوصيل طلبك."], ["حقوقك", "يمكنك في أي وقت أن تطلب الاطلاع على معلوماتك أو تصحيحها أو حذفها، عبر واتساب أو البريد الإلكتروني."]]}, "fr": {"title": "Politique de confidentialité", "parts": [["Votre vie privée compte", "Nous respectons votre vie privée et protégeons vos informations, conformément à la loi marocaine n° 09-08 relative à la protection des données personnelles."], ["Ce que nous demandons", "Uniquement ce qui est nécessaire pour vous livrer : votre nom, votre numéro de téléphone et votre adresse."], ["Pourquoi", "Pour confirmer et livrer votre commande, et vous contacter à son sujet si besoin."], ["Vos informations sont en sécurité", "Nous ne vendons ni ne louons vos informations, et nous ne les partageons que dans la mesure nécessaire à la livraison de votre commande."], ["Vos droits", "Vous pouvez à tout moment demander à consulter, corriger ou supprimer vos informations, sur WhatsApp ou par e-mail."]]}, "en": {"title": "Privacy Policy", "parts": [["Your privacy matters", "We respect your privacy and protect your information, in line with Moroccan Law No. 09-08 on personal data protection."], ["What we ask for", "Only what we need to deliver your order: your name, phone number and address."], ["Why", "To confirm and deliver your order, and to contact you about it if needed."], ["Your information is safe", "We never sell or rent your information, and we share it only as far as needed to deliver your order."], ["Your rights", "You can ask at any time to see, correct or delete your information, on WhatsApp or by email."]]}}, "terms": {"ar": {"title": "شروط البيع", "parts": [["من نحن", "Amani Market متجر إلكتروني مغربي، نوصل طلباتكم إلى جميع مدن المغرب."], ["الطلب", "اطلب بسهولة عبر الموقع أو واتساب، ونتصل بك لتأكيد طلبك قبل إرساله."], ["الأسعار والتوصيل", "الأسعار بالدرهم المغربي، والتوصيل مجاني إلى جميع المدن."], ["الدفع", "تدفع عند استلام طلبك فقط، دون الحاجة إلى بطاقة بنكية."], ["المنتجات", "نحرص على أن تكون الصور والأوصاف مطابقة للمنتج، وقد يختلف اللون قليلاً حسب الشاشة."], ["التوفر", "إذا نفد منتج بعد طلبك، نخبرك فوراً ونقترح عليك بديلاً أو نلغي الطلب دون أي تكلفة."], ["الضمان", "جميع منتجاتنا مضمونة لمدة 15 يوماً ضد عيوب التصنيع."], ["القانون المطبق", "تخضع هذه الشروط للقانون المغربي، ونحرص دائماً على حل أي مشكل بشكل ودي وسريع."]]}, "fr": {"title": "Conditions de vente", "parts": [["Qui sommes-nous", "Amani Market est une boutique en ligne marocaine qui livre dans toutes les villes du Maroc."], ["Commande", "Commandez facilement sur le site ou sur WhatsApp ; nous vous appelons pour confirmer votre commande avant l'envoi."], ["Prix et livraison", "Les prix sont en dirhams marocains et la livraison est gratuite dans toutes les villes."], ["Paiement", "Vous payez uniquement à la réception de votre commande, sans carte bancaire."], ["Produits", "Nous veillons à ce que les photos et descriptions correspondent au produit ; la couleur peut légèrement varier selon l'écran."], ["Disponibilité", "Si un produit n'est plus disponible après votre commande, nous vous prévenons tout de suite et vous proposons un équivalent ou l'annulation, sans aucun frais."], ["Garantie", "Tous nos produits sont garantis 15 jours contre les défauts de fabrication."], ["Droit applicable", "Ces conditions relèvent du droit marocain, et nous cherchons toujours une solution amiable et rapide à tout problème."]]}, "en": {"title": "Terms of Sale", "parts": [["Who we are", "Amani Market is a Moroccan online shop delivering to every city in Morocco."], ["Ordering", "Order easily on the site or on WhatsApp; we call you to confirm your order before sending it."], ["Prices and delivery", "Prices are in Moroccan dirhams, and delivery is free to every city."], ["Payment", "You pay only when you receive your order, with no bank card needed."], ["Products", "We make sure photos and descriptions match the product; the colour may vary slightly depending on your screen."], ["Availability", "If a product runs out after you order, we tell you right away and offer an equivalent or a cancellation, at no cost."], ["Warranty", "All our products come with a 15-day warranty against manufacturing defects."], ["Applicable law", "These terms are governed by Moroccan law, and we always look for a quick, friendly solution to any problem."]]}}, "returns": {"ar": {"title": "الإرجاع والاسترداد", "parts": [["رضاك يهمنا", "إذا لم يعجبك المنتج، يمكنك إرجاعه خلال 7 أيام من الاستلام، ما دام غير مستعمل وفي تغليفه الأصلي."], ["منتج معيب أو غير مطابق", "نستبدله أو نرد لك المبلغ كاملاً، والمصاريف على حسابنا."], ["كيف تُرجع منتجاً", "راسلنا عبر واتساب أو البريد الإلكتروني مع رقم الطلب، ونرتب معك كل شيء."], ["استرداد المبلغ", "نرد لك المبلغ في أقرب وقت، وفي أجل لا يتجاوز 15 يوماً."], ["للعلم", "إذا غيرت رأيك، تكون مصاريف الإرجاع فقط على حسابك. وحفاظاً على صحتك، لا تُرجع العطور ومنتجات العناية بعد فتحها، إلا إذا كانت معيبة."]]}, "fr": {"title": "Retours et remboursements", "parts": [["Votre satisfaction compte", "Si le produit ne vous plaît pas, vous pouvez le retourner dans les 7 jours suivant la réception, tant qu'il n'a pas été utilisé et reste dans son emballage d'origine."], ["Produit défectueux ou non conforme", "Nous l'échangeons ou vous remboursons intégralement, à nos frais."], ["Comment retourner un produit", "Écrivez-nous sur WhatsApp ou par e-mail avec votre numéro de commande, et nous organisons tout avec vous."], ["Remboursement", "Nous vous remboursons au plus vite, dans un délai de 15 jours maximum."], ["À noter", "Si vous changez d'avis, seuls les frais de retour sont à votre charge. Pour votre santé, les parfums et produits de soin ne sont pas repris une fois ouverts, sauf s'ils sont défectueux."]]}, "en": {"title": "Returns & Refunds", "parts": [["Your satisfaction matters", "If you don't like the product, you can return it within 7 days of receipt, as long as it is unused and in its original packaging."], ["Faulty or wrong product", "We exchange it or refund you in full, at our cost."], ["How to return a product", "Write to us on WhatsApp or by email with your order number, and we arrange everything with you."], ["Refunds", "We refund you as soon as possible, within 15 days at most."], ["Good to know", "If you change your mind, only the return shipping is on you. For your health, perfumes and care products cannot be returned once opened, unless they are faulty."]]}}, "shipping": {"ar": {"title": "التوصيل والدفع", "parts": [["التوصيل إلى جميع المدن", "نوصل طلبك مجاناً إلى أي مدينة في المغرب."], ["توصيل سريع", "تصل أغلب الطلبات خلال 24 إلى 48 ساعة، وقد تحتاج المناطق البعيدة بضعة أيام إضافية."], ["الدفع عند الاستلام", "تدفع نقداً عند استلام طلبك، دون الحاجة إلى بطاقة بنكية."], ["نبقى على تواصل معك", "نتصل بك لتأكيد طلبك، ويتصل بك الموزع قبل وصوله، ونرسل لك رقم التتبع عبر واتساب عند توفره."]]}, "fr": {"title": "Livraison et paiement", "parts": [["Livraison dans tout le Maroc", "Nous livrons gratuitement votre commande dans toutes les villes du Maroc."], ["Livraison rapide", "La plupart des commandes arrivent en 24 à 48 heures ; les zones éloignées peuvent demander quelques jours de plus."], ["Paiement à la livraison", "Vous payez en espèces à la réception, sans carte bancaire."], ["Nous restons en contact", "Nous vous appelons pour confirmer votre commande, le livreur vous appelle avant d'arriver, et nous vous envoyons le numéro de suivi sur WhatsApp lorsqu'il est disponible."]]}, "en": {"title": "Shipping & Payment", "parts": [["Delivery to every city", "We deliver your order free of charge to any city in Morocco."], ["Fast delivery", "Most orders arrive within 24 to 48 hours; remote areas may take a few more days."], ["Cash on delivery", "You pay in cash when you receive your order, with no bank card needed."], ["We keep in touch", "We call you to confirm your order, the courier calls you before arriving, and we send you the tracking number on WhatsApp when available."]]}}};
+        const POLICY_FIRST_DAY = { privacy: 4, terms: 7, returns: 11, shipping: 14 }; // in August 2026
+        const POLICY_WORDS = {
+            ar: { updated: 'آخر تحديث:', contact: 'تواصل معنا', help: 'لأي سؤال، نحن هنا لمساعدتك:', close: 'إغلاق',
+                  months: ['يناير', 'فبراير', 'مارس', 'أبريل', 'ماي', 'يونيو', 'يوليوز', 'غشت', 'شتنبر', 'أكتوبر', 'نونبر', 'دجنبر'] },
+            fr: { updated: 'Dernière mise à jour :', contact: 'Nous contacter', help: 'Une question ? Nous sommes là pour vous aider :', close: 'Fermer',
+                  months: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'] },
+            en: { updated: 'Last updated:', contact: 'Contact us', help: 'Any question? We are here to help:', close: 'Close',
+                  months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] }
+        };
+
+        function policyUpdatedDate(key, now = new Date()) {
+            const firstDay = POLICY_FIRST_DAY[key] || 4;
+            let last = new Date(2026, 7, firstDay);
+            for (let step = 1; step < 600; step++) {
+                const next = new Date(2026, 7 + 2 * step, ((firstDay - 1 + step) % 28) + 1);
+                if (next > now) break;
+                last = next;
+            }
+            return last;
+        }
+
+        function formatPolicyDate(date, lang) {
+            const month = POLICY_WORDS[lang].months[date.getMonth()];
+            return lang === 'en'
+                ? `${month} ${date.getDate()}, ${date.getFullYear()}`
+                : `${date.getDate()} ${month} ${date.getFullYear()}`;
+        }
+
+        function openPolicy(key) {
+            const lang = POLICY_WORDS[window.AmaniI18n && window.AmaniI18n.lang] ? window.AmaniI18n.lang : 'ar';
+            const page = POLICIES[key] && POLICIES[key][lang];
+            const panel = document.getElementById('policyPanel');
+            if (!page || !panel) return;
+            const words = POLICY_WORDS[lang];
+            panel.lang = lang;
+            panel.dir = lang === 'ar' ? 'rtl' : 'ltr';
+            document.getElementById('policyTitle').textContent = page.title;
+            document.getElementById('policyClose').setAttribute('aria-label', words.close);
+            const make = (tag, className, text) => {
+                const element = document.createElement(tag);
+                if (className) element.className = className;
+                if (text) element.textContent = text;
+                return element;
+            };
+            const updated = make('p', 'policy-updated', `${words.updated} ${formatPolicyDate(policyUpdatedDate(key), lang)}`);
+            const parts = page.parts.map(([title, text]) => {
+                const part = make('section', 'policy-part');
+                part.append(make('h3', '', title), make('p', '', text));
+                return part;
+            });
+            const contact = make('section', 'policy-part policy-contact');
+            const lines = make('p', '', words.help);
+            const whatsapp = make('a', '', '+212 754 708 678');
+            whatsapp.href = 'https://wa.me/212754708678';
+            whatsapp.target = '_blank';
+            whatsapp.rel = 'noopener noreferrer';
+            whatsapp.dir = 'ltr';
+            const email = make('a', '', 'Admin@Boutiqueamani-maroc.com');
+            email.href = 'mailto:Admin@Boutiqueamani-maroc.com';
+            email.dir = 'ltr';
+            lines.append(document.createElement('br'), 'WhatsApp: ', whatsapp, document.createElement('br'), 'Email: ', email);
+            contact.append(make('h3', '', words.contact), lines);
+            document.getElementById('policyBody').replaceChildren(updated, ...parts, contact);
+            panel.scrollTop = 0;
+            panel.hidden = false;
+            document.body.style.overflow = 'hidden';
+            document.getElementById('policyClose').focus();
+        }
+
+        function closePolicy() {
+            const panel = document.getElementById('policyPanel');
+            if (!panel || panel.hidden) return;
+            panel.hidden = true;
+            document.body.style.overflow = '';
+        }
+
+        document.addEventListener('click', (event) => {
+            const link = event.target.closest('[data-policy]');
+            if (!link) return;
+            event.preventDefault();
+            openPolicy(link.dataset.policy);
+        });
+        document.getElementById('policyClose')?.addEventListener('click', closePolicy);
+        document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePolicy(); });
 
         // --- 5. CART & SIDEBAR SYSTEM ---
         let cartItems = {};

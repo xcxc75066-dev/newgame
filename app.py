@@ -470,7 +470,7 @@ class ServerConfig:
     allowed_origins: tuple[str, ...]
     behind_cloudflare: bool = False
     max_body_bytes: int = MAX_JSON_BYTES
-    # When set (e.g. admin5575.boutiqueamani-maroc.com) the CMS lives only on that
+    # When set (e.g. admin5575sh.boutiqueamani-maroc.com) the CMS lives only on that
     # host and the old /mycmseditor address is closed.
     admin_host: str = ""
 

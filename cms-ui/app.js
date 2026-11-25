@@ -288,6 +288,22 @@
     ? `${location.protocol}//${location.hostname.slice('admin.'.length)}`
     : location.origin);
   $('shopLink').href = `${shopBase()}/`;
+
+  // 📵 the owner's own device: the shop opens once with a one-time code and remembers it
+  async function ownerLink(on) {
+    const tab = window.open('', '_blank');  // opened now, while the tap still counts
+    try {
+      const data = await api('/me', { method: 'POST', body: { on } });
+      const url = `${shopBase()}/?me=${data.code}`;
+      if (tab) tab.location.href = url; else window.location.href = url;
+      toast(on ? 'تحل المتجر: هاد الجهاز ما بقاش كيتحسب ✓' : 'تحل المتجر: هاد الجهاز رجع كيتحسب ✓', 'success');
+    } catch (error) {
+      if (tab) tab.close();
+      toast(error.message, 'error');
+    }
+  }
+  $('notMeBtn').addEventListener('click', () => ownerLink(true));
+  $('countMeBtn').addEventListener('click', () => ownerLink(false));
   $('shopLink').querySelector('small').textContent = shopBase().replace(/^https?:\/\//, '');
 
   // ---------------------------------------------------------------- navigation

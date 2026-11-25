@@ -3713,7 +3713,11 @@
             return { v: visitor, s: session.id, isNew };
         }
 
+        // The owner's own phone/computer (set from the CMS: 📵) is never counted.
+        const isOwnerDevice = () => trackStorage('amani-me') === '1';
+
         function trackEvent(type, extra = {}) {
+            if (isOwnerDevice()) return;
             try {
                 const ids = trackIds();
                 const send = (payload) => {
@@ -3727,6 +3731,29 @@
                 console.warn('Statistics event skipped.', error);
             }
         }
+
+        // /?me=<code>: link from the CMS button "📵 ما تحسبش هاد الجهاز" (or "✅ رجع احسبني")
+        (function ownerLink() {
+            let code = '';
+            try { code = new URLSearchParams(window.location.search).get('me') || ''; } catch (_) { return; }
+            if (!/^[a-f0-9]{24}$/.test(code)) return;
+            const url = new URL(window.location.href);
+            url.searchParams.delete('me');
+            window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+            fetch('/api/me', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, v: trackIds().v }) })
+                .then(response => response.ok ? response.json() : Promise.reject(response))
+                .then(data => {
+                    if (data.ignored) {
+                        trackStorage('amani-me', '1');
+                        showToast('✅ This device is no longer counted in the statistics');
+                    } else {
+                        try { window.localStorage.removeItem('amani-me'); } catch (_) { /* ignore */ }
+                        showToast('✅ This device is counted again');
+                    }
+                })
+                .catch(() => showToast('❌ This link has expired. Open it again from the CMS.'));
+        })();
 
         function trackingIdsForOrder() {
             const ids = trackIds();

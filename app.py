@@ -86,7 +86,6 @@ PUBLIC_DIRECTORIES = frozenset(
         "categories-json",
         "footers-html",
         "templates-html",  # category pages opened from the menu
-        "policies",  # privacy, terms, returns, shipping (linked in the footer)
         "assets",
         "images",
     }

@@ -1909,8 +1909,7 @@
         }
 
         .qm-variant-selected {
-            color: #4a3d23; /* black brought 30% towards the gold */
-            color: color-mix(in srgb, var(--text-dark) 70%, var(--gold-accent) 30%);
+            color: var(--primary-green);
             font-size: 0.95rem;
             font-weight: 700;
             display: inline-flex;
@@ -1927,7 +1926,7 @@
 
         .qm-variant-options {
             display: flex;
-            gap: 16px 22px; /* more room between the colors / sizes, side by side and between rows */
+            gap: 16px 15px; /* rows 16px apart; side by side 15px (30% closer than 22px) */
             flex-wrap: wrap;
         }
 

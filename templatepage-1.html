@@ -4526,12 +4526,12 @@
                     .filter(item => item && Array.isArray(item.options))
                     .map(item => ({
                         name: String(item.name || item.label || item.type || 'Option'),
+                        photos: item.photos === true, // this group changes the photos (set in the CMS)
                         options: item.options.map(option => ({
                             name: String(typeof option === 'string' ? option : (option.name || option.label || 'Option')),
                             img: String(typeof option === 'string' ? '' : (option.img || option.image || '')),
                             gallery: typeof option === 'object' && Array.isArray(option.gallery)
                                 ? option.gallery.filter(url => typeof url === 'string' && url) : [],
-                            isDefault: typeof option === 'object' && option.default === true,
                             soldOut: Boolean(typeof option === 'string' ? false : option.soldOut),
                             priceAdd: parsePriceAdjustment(typeof option === 'string' ? 0 : (option.priceAdd ?? option.priceDelta ?? option.extraPrice))
                         }))
@@ -4690,13 +4690,10 @@
             selectedVariants = {};
             currentQty = 1;
 
-            qmMediaGroup = null;
+            qmMediaGroup = null; // the product's own photos first
             currentQmProduct.variants.forEach((group, groupIndex) => {
-                // the option marked "default" in the CMS is chosen first (if it isn't sold out)
-                const marked = group.options.findIndex(option => option.isDefault && !option.soldOut);
                 const firstAvailable = group.options.findIndex(option => !option.soldOut);
-                selectedVariants[groupIndex] = marked >= 0 ? marked : (firstAvailable >= 0 ? firstAvailable : 0);
-                if (marked >= 0 && qmMediaGroup === null && optionPhotos(group.options[marked]).length) qmMediaGroup = groupIndex;
+                selectedVariants[groupIndex] = firstAvailable >= 0 ? firstAvailable : 0;
             });
 
             document.getElementById('qmTitle').innerText = title;
@@ -4723,14 +4720,16 @@
 
             const changed = selectedVariants[groupIndex] !== optionIndex;
             selectedVariants[groupIndex] = optionIndex;
-            // The photos of the chosen color / size take the place of the product photos.
-            // An option without photos gives the product photos back.
-            if (changed && optionPhotos(option).length) {
-                qmMediaGroup = groupIndex;
-                showQmMedia();
-            } else if (changed && qmMediaGroup === groupIndex) {
-                qmMediaGroup = null;
-                showQmMedia();
+            // Only the group chosen in the CMS (the first one if none) changes the photos above
+            // the description: its option's photos, or the product photos if it has none.
+            // Tapping the other groups (e.g. sizes) leaves the photos as they are.
+            if (groupIndex === qmPhotoGroup()) {
+                const next = optionPhotos(option).length ? groupIndex : null;
+                // also when the first option, already chosen, is tapped while the product photos show
+                if (changed || next !== qmMediaGroup) {
+                    qmMediaGroup = next;
+                    showQmMedia();
+                }
             }
             renderQmVariants();
             updateQmPriceDisplay();
@@ -4814,6 +4813,11 @@
         // Which photos show above the description: the product's, or those of the chosen option
         var qmMediaProduct; // var with no value: a product link can open the popup before this line runs
         var qmMediaGroup;
+
+        function qmPhotoGroup() {
+            const marked = currentQmProduct.variants.findIndex(group => group.photos);
+            return marked >= 0 ? marked : 0;
+        }
 
         function optionPhotos(option) {
             return option ? [option.img, ...(option.gallery || [])].filter(Boolean) : [];

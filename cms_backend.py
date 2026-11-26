@@ -376,13 +376,14 @@ def clean_product(
             ]
             if option_gallery:
                 clean_option["gallery"] = option_gallery
-            # Only one "default" option per group: the one the shop chooses first
-            if option.get("default") is True and not any(o.get("default") for o in clean_options):
-                clean_option["default"] = True
             clean_options.append(clean_option)
         if all(option["soldOut"] for option in clean_options):
             raise CmsError(400, f"{label}: كل خيارات «{group_name}» نافدة؛ اترك خياراً واحداً متوفراً أو أخفِ المنتج.")
-        clean_groups.append({"name": group_name, "options": clean_options})
+        clean_group = {"name": group_name, "options": clean_options}
+        # ⭐ the one group whose options change the product photos (the first group if none)
+        if group.get("photos") is True and not any(g.get("photos") for g in clean_groups):
+            clean_group["photos"] = True
+        clean_groups.append(clean_group)
 
     gallery = raw.get("gallery") or []
     if not isinstance(gallery, list) or len(gallery) > MAX_GALLERY_IMAGES:

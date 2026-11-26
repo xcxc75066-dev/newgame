@@ -87,6 +87,14 @@
     'Default': ['افتراضي', 'Standard'],
     'Size': ['الحجم', 'Taille'],
     'Color': ['اللون', 'Couleur'],
+    'Colour': ['اللون', 'Couleur'],
+    'Couleur': ['اللون', 'Couleur'],
+    'Taille': ['الحجم', 'Taille'],
+    'Pointure': ['المقاس', 'Pointure'],
+    'Style': ['النوع', 'Style'],
+    'Model': ['الموديل', 'Modèle'],
+    'Option': ['الخيار', 'Option'],
+    'Sold out': ['نفد', 'Épuisé'],
     'Option': ['الخيار', 'Option'],
     'Dark mode': ['الوضع الداكن', 'Mode sombre'],
     'Light mode': ['الوضع الفاتح', 'Mode clair'],
@@ -136,6 +144,7 @@
       return [m[1] + ': نفد من المخزون. حدّث الصفحة.', m[1] + ' : rupture de stock. Actualisez la page.'];
     }],
     [/^Quantity: (\d+) ·$/, function (m) { return ['الكمية: ' + m[1] + ' ·', 'Quantité : ' + m[1] + ' ·']; }],
+    [/^Quantity: (\d+)$/, function (m) { return ['الكمية: ' + m[1], 'Quantité : ' + m[1]]; }],
     [/^\/ item\)?$/, function (m) { return ['للقطعة' + (m[0].slice(-1) === ')' ? ')' : ''), '/ pièce' + (m[0].slice(-1) === ')' ? ')' : '')]; }],
   ];
 
@@ -180,13 +189,27 @@
 
   function norm(text) { return String(text || '').replace(ISOLATES, '').replace(/\s+/g, ' ').trim(); }
 
+  // "color", "SIZE"… find "Color", "Size": the same word whatever its capitals
+  var UI_LOWER = null;
+  var productsLower = null;
+  function lowerMap(source) {
+    var map = {};
+    Object.keys(source).forEach(function (k) { var l = k.toLowerCase(); if (!(l in map)) map[l] = source[k]; });
+    return map;
+  }
+
   function translateText(source) {
     var key = norm(source);
     if (!key) return null;
     if (products[key]) return products[key];
+    var lower = key.toLowerCase();
+    if (!productsLower) productsLower = lowerMap(products);
+    if (lower !== key && productsLower[lower]) return productsLower[lower];
     if (lang === 'en') return null;
     var index = lang === 'ar' ? 0 : 1;
     if (UI[key]) return UI[key][index];
+    if (!UI_LOWER) UI_LOWER = lowerMap(UI);
+    if (UI_LOWER[lower]) return UI_LOWER[lower][index];
     for (var i = 0; i < PATTERNS.length; i++) {
       var m = key.match(PATTERNS[i][0]);
       if (m) return PATTERNS[i][1](m, function (part) { var r = translateText(part); return r || part; })[index];
@@ -217,7 +240,9 @@
 
   var ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
   function doAttrs(el) {
-    if (skip(el)) return;
+    // an input's typed text is never touched, but its placeholder ("Enter your full name") is translated
+    var tag = el.tagName;
+    if ((tag === 'INPUT' || tag === 'TEXTAREA') ? (el.parentElement && skip(el.parentElement)) : skip(el)) return;
     for (var i = 0; i < ATTRS.length; i++) {
       var value = el.getAttribute(ATTRS[i]);
       if (!value) continue;
@@ -347,6 +372,7 @@
       .then(function (response) { return response.ok ? response.json() : {}; })
       .then(function (data) {
         products = (data && data.texts) || {};
+        productsLower = null;
         if (Object.keys(products).length) { generation += 1; walk(document.body); }
       })
       .catch(function () { /* products stay in their language */ });

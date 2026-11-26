@@ -4,7 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="google" content="notranslate">
     <!-- Languages: Arabic by default, French, English (no Google Translate) -->
-    <script src="/assets/i18n.js?v=6"></script>
+    <script src="/assets/i18n.js?v=7"></script>
     <title>Amani Market - Entertainment Products</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <meta name="theme-color" content="#0A3A2A">
@@ -113,6 +113,21 @@
         /* In Arabic the menu button sits on the left, so the menu opens from the left */
         html[dir="rtl"] .nav-sidebar { right: auto; left: -320px; transition: left 0.3s ease; box-shadow: 2px 0 15px rgba(0, 0, 0, 0.15); }
         html[dir="rtl"] .nav-sidebar.active { left: 0; }
+        /* Arabic: the product window, the cart and the menu read from the right
+           ("الكمية:" on the right). Photos keep sliding left to right. */
+        html[dir="rtl"] .qm-modal-card,
+        html[dir="rtl"] .sidebar-header,
+        html[dir="rtl"] .sidebar-quick-links,
+        html[dir="rtl"] .nav-links,
+        html[dir="rtl"] .cart-items-container,
+        html[dir="rtl"] .cart-details-header,
+        html[dir="rtl"] .cart-form input,
+        html[dir="rtl"] .cart-total-row,
+        html[dir="rtl"] .success-message { direction: rtl; }
+        html[dir="rtl"] .cart-field label,
+        html[dir="rtl"] .cart-form input { text-align: right; }
+        html[dir="rtl"] .qm-close-btn { right: auto; left: 15px; }
+        html[dir="rtl"] .qm-variant-selected { align-items: flex-start; }
 
         :root {
             --primary-green: #0a3a2a;
@@ -1911,7 +1926,7 @@
 
         .qm-variant-options {
             display: flex;
-            gap: 16px 22px; /* more room between the colors / sizes, side by side and between rows */
+            gap: 16px 15px; /* rows 16px apart; side by side 15px (30% closer than 22px) */
             flex-wrap: wrap;
         }
 
@@ -5238,6 +5253,8 @@
         function formatCartVariants(item, separator = ', ', asHtml = false) {
             const escapeText = (text) => text.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
             const showOption = (option) => asHtml ? `<span class="notranslate">${escapeText(option)}</span>` : option;
+            const showGroup = (group) => asHtml ? `<span>${escapeText(group)}</span>` : group; // its own text: translated alone
+            if (asHtml && document.documentElement.dir === 'rtl' && separator === ', ') separator = '، '; // Arabic comma
             if (Array.isArray(item.variants) && item.variants.length > 0) {
                 return item.variants
                 .map(variant => {
@@ -5245,14 +5262,14 @@
                     const rawGroup = String(variant.group || 'option');
                     const group = normalizeLegacyGroupName(rawGroup, option);
                     const adjustment = formatPriceAdjustment(variant.priceAdd, true);
-                    return `${group.toLowerCase()} : ${showOption(option)}${adjustment ? ` ${adjustment}` : ''}`;
+                    return `${showGroup(group.toLowerCase())} : ${showOption(option)}${adjustment ? ` ${adjustment}` : ''}`;
                 })
                     .join(separator);
             }
             if (!item.colorName || item.colorName === 'Default') return ''; // no colors / sizes
             const fallbackOption = String(item.colorName || 'default');
             const fallbackGroup = normalizeLegacyGroupName(item.variantLabel || 'option', fallbackOption);
-            return `${fallbackGroup.toLowerCase()} : ${showOption(fallbackOption)}`;
+            return `${showGroup(fallbackGroup.toLowerCase())} : ${showOption(fallbackOption)}`;
         }
 
         function hidePromoBar() {

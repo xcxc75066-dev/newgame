@@ -4563,7 +4563,7 @@
                 const title = document.createElement('span');
                 title.innerText = `Choose preferred ${group.name}:`;
                 const selectedLabel = document.createElement('span');
-                selectedLabel.className = 'qm-variant-selected';
+                selectedLabel.className = 'qm-variant-selected notranslate'; // "M", "XL", "Rouge"… stay as written in the CMS
 
                 const selectedIndex = selectedVariants[groupIndex];
                 const selectedOption = group.options[selectedIndex];
@@ -4605,7 +4605,7 @@
                         optionButton.appendChild(image);
                     }
                     const optionLabel = document.createElement('span');
-                    optionLabel.className = 'qm-option-name';
+                    optionLabel.className = 'qm-option-name notranslate'; // never translated
                     optionLabel.innerText = option.name;
                     optionButton.appendChild(optionLabel);
                     optionButton.addEventListener('click', () => {
@@ -5233,7 +5233,11 @@
             }
         }
 
-        function formatCartVariants(item, separator = ', ') {
+        // asHtml: for the cart on screen. The option ("M", "XL", "Rouge"…) is kept as written
+        // in the CMS and never translated; only the group word ("size", "color") is.
+        function formatCartVariants(item, separator = ', ', asHtml = false) {
+            const escapeText = (text) => text.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+            const showOption = (option) => asHtml ? `<span class="notranslate">${escapeText(option)}</span>` : option;
             if (Array.isArray(item.variants) && item.variants.length > 0) {
                 return item.variants
                 .map(variant => {
@@ -5241,14 +5245,14 @@
                     const rawGroup = String(variant.group || 'option');
                     const group = normalizeLegacyGroupName(rawGroup, option);
                     const adjustment = formatPriceAdjustment(variant.priceAdd, true);
-                    return `${group.toLowerCase()} : ${option.toLowerCase()}${adjustment ? ` ${adjustment}` : ''}`;
+                    return `${group.toLowerCase()} : ${showOption(option)}${adjustment ? ` ${adjustment}` : ''}`;
                 })
                     .join(separator);
             }
             if (!item.colorName || item.colorName === 'Default') return ''; // no colors / sizes
             const fallbackOption = String(item.colorName || 'default');
             const fallbackGroup = normalizeLegacyGroupName(item.variantLabel || 'option', fallbackOption);
-            return `${fallbackGroup.toLowerCase()} : ${fallbackOption.toLowerCase()}`;
+            return `${fallbackGroup.toLowerCase()} : ${showOption(fallbackOption)}`;
         }
 
         function hidePromoBar() {
@@ -5286,7 +5290,7 @@
                     <img src="${item.image || ''}" alt="">
                     <div class="cart-detail-item-info">
                         <div class="cart-detail-item-title">${item.title}</div>
-                        <div class="cart-detail-item-variants">${formatCartVariants(item)}</div>
+                        <div class="cart-detail-item-variants">${formatCartVariants(item, ', ', true)}</div>
                         <div class="cart-detail-item-meta">Quantity: ${item.qty} · <span class="notranslate">${item.price} DH</span> / item</div>
                     </div>
                     <div class="cart-detail-item-total notranslate">${itemTotal} DH</div>
@@ -5343,7 +5347,7 @@
                             <img src="${item.image}" alt="">
                             <div class="cart-item-info">
                                 <div class="cart-item-title">${item.title}</div>
-                                <div class="cart-item-color">${formatCartVariants(item)}</div>
+                                <div class="cart-item-color">${formatCartVariants(item, ', ', true)}</div>
                                 <div class="cart-item-price"><span class="notranslate">${itemTotal} DH</span> (<span class="notranslate">${item.price} DH</span> / item)</div>
                                 <div class="cart-item-qty">Quantity: ${item.qty}</div>
                             </div>

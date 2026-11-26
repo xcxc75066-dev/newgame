@@ -71,6 +71,7 @@ UPLOAD_NAME_PATTERN = re.compile(r"^[a-f0-9]{24}\.(?:jpg|png|webp|mp4)$")
 VIDEO_SRC_PATTERN = re.compile(r"^/uploads/[a-f0-9]{24}\.mp4$")
 VIDEO_POSTER_PATTERN = re.compile(r"^/uploads/[a-f0-9]{24}\.jpg$")
 MAX_GALLERY_IMAGES = 8
+MAX_OPTION_IMAGES = 6  # extra photos for one color / size
 MAX_VIDEO_UPLOAD_BYTES = 400 * 1024 * 1024
 MAX_VIDEO_SECONDS = 60
 HISTORY_NAME_PATTERN = re.compile(r"^products-\d{8}T\d{12}Z\.json$")
@@ -360,14 +361,25 @@ def clean_product(
             )
             if Decimal(str(price)) + Decimal(str(price_add)) < 0:
                 raise CmsError(400, f"{label}: الخيار «{option_name}» يجعل الثمن أقل من 0.")
-            clean_options.append(
-                {
-                    "name": option_name,
-                    "img": _image_url(option.get("img"), f"{label} - صورة «{option_name}»", required=False),
-                    "soldOut": bool(option.get("soldOut")),
-                    "priceAdd": price_add,
-                }
-            )
+            clean_option = {
+                "name": option_name,
+                "img": _image_url(option.get("img"), f"{label} - صورة «{option_name}»", required=False),
+                "soldOut": bool(option.get("soldOut")),
+                "priceAdd": price_add,
+            }
+            # More photos of this option: they replace the product photos when it is chosen
+            option_gallery = option.get("gallery") or []
+            if not isinstance(option_gallery, list) or len(option_gallery) > MAX_OPTION_IMAGES:
+                raise CmsError(400, f"{label}: الحد الأقصى {MAX_OPTION_IMAGES} صور إضافية لـ «{option_name}».")
+            option_gallery = [
+                _image_url(url, f"{label} - صورة إضافية لـ «{option_name}»", required=True) for url in option_gallery
+            ]
+            if option_gallery:
+                clean_option["gallery"] = option_gallery
+            # Only one "default" option per group: the one the shop chooses first
+            if option.get("default") is True and not any(o.get("default") for o in clean_options):
+                clean_option["default"] = True
+            clean_options.append(clean_option)
         if all(option["soldOut"] for option in clean_options):
             raise CmsError(400, f"{label}: كل خيارات «{group_name}» نافدة؛ اترك خياراً واحداً متوفراً أو أخفِ المنتج.")
         clean_groups.append({"name": group_name, "options": clean_options})

@@ -642,6 +642,7 @@
     const draft = isNew ? newProduct() : clone(state.lists[list][index]);
     if (isNew) draft.id = 'AP' + Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
     draft.colors = draft.colors || [];
+    draft.colors.forEach((g) => (g.options || []).forEach((o) => { delete o.default; })); // old per-option setting
     draft.badges = draft.badges || [];
     draft.gallery = Array.isArray(draft.gallery) ? draft.gallery : [];
     draft.video = draft.video && draft.video.src ? draft.video : null;
@@ -822,6 +823,12 @@
         h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف المجموعة', title: 'حذف المجموعة', icon: 'trash',
           onclick: () => { draft.colors.splice(gi, 1); markDirty(); renderGroups(); } })
       ),
+      // ⭐ default: only this group changes the photos above the description (the first one if none chosen)
+      h('label', { class: 'mini-check group-photos', title: 'غير الخيارات ديال هاد المجموعة كيبدلو الصورة اللي فوق الوصف' },
+        h('input', { type: 'radio', name: 'photos-group',
+          checked: draft.colors.some((g) => g.photos) ? !!group.photos : gi === 0,
+          onchange: () => { draft.colors.forEach((g) => { delete g.photos; }); group.photos = true; markDirty(); renderGroups(); } }),
+        '⭐ افتراضي: هادي اللي كتبدل الصور'),
       ...group.options.map((option, oi) => h('div', { class: 'option-row' },
         h('input', { value: option.name, dir: 'auto', placeholder: 'الخيار (مثال: 50 ml)', 'aria-label': 'اسم الخيار', maxlength: 60,
           oninput: (e) => { option.name = e.target.value; } }),
@@ -834,17 +841,6 @@
           h('label', { class: 'mini-check' },
             h('input', { type: 'checkbox', checked: !!option.soldOut, onchange: (e) => { option.soldOut = e.target.checked; } }),
             'نفد'),
-          // ⭐ default: chosen first in the shop, and its photos show above the description
-          h('label', { class: 'mini-check', title: 'هاد الخيار كيكون مختار من الأول فالمتجر' },
-            h('input', { type: 'radio', name: `default-${gi}`, checked: !!option.default,
-              onclick: (e) => {
-                const wasOn = !!option.default;
-                group.options.forEach((o) => { delete o.default; });
-                if (!wasOn) option.default = true;
-                e.target.checked = !wasOn;
-                markDirty(); renderGroups();
-              } }),
-            'افتراضي'),
           h('img', { src: option.img || PLACEHOLDER, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
           h('input', { value: option.img || '', placeholder: 'صورة الخيار (اختياري)', dir: 'ltr', 'aria-label': 'رابط صورة الخيار',
             oninput: (e) => { option.img = e.target.value.trim(); } }),

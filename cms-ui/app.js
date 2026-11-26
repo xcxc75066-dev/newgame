@@ -834,12 +834,32 @@
           h('label', { class: 'mini-check' },
             h('input', { type: 'checkbox', checked: !!option.soldOut, onchange: (e) => { option.soldOut = e.target.checked; } }),
             'نفد'),
+          // ⭐ default: chosen first in the shop, and its photos show above the description
+          h('label', { class: 'mini-check', title: 'هاد الخيار كيكون مختار من الأول فالمتجر' },
+            h('input', { type: 'radio', name: `default-${gi}`, checked: !!option.default,
+              onclick: (e) => {
+                const wasOn = !!option.default;
+                group.options.forEach((o) => { delete o.default; });
+                if (!wasOn) option.default = true;
+                e.target.checked = !wasOn;
+                markDirty(); renderGroups();
+              } }),
+            'افتراضي'),
           h('img', { src: option.img || PLACEHOLDER, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
           h('input', { value: option.img || '', placeholder: 'صورة الخيار (اختياري)', dir: 'ltr', 'aria-label': 'رابط صورة الخيار',
             oninput: (e) => { option.img = e.target.value.trim(); } }),
           h('button', { class: 'icon-btn', type: 'button', title: 'رفع صورة للخيار', 'aria-label': 'رفع صورة للخيار', icon: 'camera',
             onclick: () => pickImage((url) => { option.img = url; markDirty(); renderGroups(); }) })
-        )
+        ),
+        // more photos of this option: they take the place of the product photos when it is chosen
+        option.img ? h('div', { class: 'option-photos' },
+          ...(option.gallery || []).map((url, pi) => h('div', { class: 'option-photo' },
+            h('img', { src: url, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
+            h('button', { type: 'button', 'aria-label': 'حيد الصورة', title: 'حيد الصورة', icon: 'close',
+              onclick: () => { option.gallery.splice(pi, 1); if (!option.gallery.length) delete option.gallery; markDirty(); renderGroups(); } }))),
+          (option.gallery || []).length < 6 ? h('button', { class: 'btn ghost small', type: 'button', icon: 'plus',
+            onclick: () => pickImage((url) => { (option.gallery = option.gallery || []).push(url); markDirty(); renderGroups(); }) }, 'صور خرين') : null
+        ) : null
       )),
       h('button', { class: 'btn ghost small', type: 'button', icon: 'plus',
         onclick: () => { group.options.push({ name: '', img: '', soldOut: false, priceAdd: 0 }); markDirty(); renderGroups(); } }, 'زيد خيار')

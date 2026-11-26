@@ -108,6 +108,11 @@
         html[dir="rtl"] .announcement-bar,
         html[dir="rtl"] .announcement-track { direction: ltr; } /* the bar too, or the text runs out and leaves it empty */
         html[dir="rtl"] .announcement-track > span { direction: rtl; unicode-bidi: isolate; }
+        /* Arabic is read from the right: the text comes in from the left and moves right */
+        html[dir="rtl"] .announcement-track { animation-direction: reverse; }
+        /* In Arabic the menu button sits on the left, so the menu opens from the left */
+        html[dir="rtl"] .nav-sidebar { right: auto; left: -320px; transition: left 0.3s ease; box-shadow: 2px 0 15px rgba(0, 0, 0, 0.15); }
+        html[dir="rtl"] .nav-sidebar.active { left: 0; }
 
         :root {
             --primary-green: #0a3a2a;
@@ -1906,7 +1911,7 @@
 
         .qm-variant-options {
             display: flex;
-            gap: 10px;
+            gap: 16px 22px; /* more room between the colors / sizes, side by side and between rows */
             flex-wrap: wrap;
         }
 
@@ -4502,6 +4507,9 @@
                         options: item.options.map(option => ({
                             name: String(typeof option === 'string' ? option : (option.name || option.label || 'Option')),
                             img: String(typeof option === 'string' ? '' : (option.img || option.image || '')),
+                            gallery: typeof option === 'object' && Array.isArray(option.gallery)
+                                ? option.gallery.filter(url => typeof url === 'string' && url) : [],
+                            isDefault: typeof option === 'object' && option.default === true,
                             soldOut: Boolean(typeof option === 'string' ? false : option.soldOut),
                             priceAdd: parsePriceAdjustment(typeof option === 'string' ? 0 : (option.priceAdd ?? option.priceDelta ?? option.extraPrice))
                         }))
@@ -4660,14 +4668,20 @@
             selectedVariants = {};
             currentQty = 1;
 
+            qmMediaGroup = null;
             currentQmProduct.variants.forEach((group, groupIndex) => {
+                // the option marked "default" in the CMS is chosen first (if it isn't sold out)
+                const marked = group.options.findIndex(option => option.isDefault && !option.soldOut);
                 const firstAvailable = group.options.findIndex(option => !option.soldOut);
-                selectedVariants[groupIndex] = firstAvailable >= 0 ? firstAvailable : 0;
+                selectedVariants[groupIndex] = marked >= 0 ? marked : (firstAvailable >= 0 ? firstAvailable : 0);
+                if (marked >= 0 && qmMediaGroup === null && optionPhotos(group.options[marked]).length) qmMediaGroup = groupIndex;
             });
 
             document.getElementById('qmTitle').innerText = title;
             document.querySelector('.qm-description').textContent = desc.trim(); // text only, never HTML
-            renderQmMedia(prod, img);
+            qmMediaProduct = { prod, img };
+            startProductWatch(currentQmProduct.id);
+            showQmMedia();
             document.getElementById('qmQtyVal').innerText = currentQty;
             renderQmVariants();
             renderQmStock();
@@ -4685,13 +4699,16 @@
             const option = group && group.options[optionIndex];
             if (!option || option.soldOut) return;
 
+            const changed = selectedVariants[groupIndex] !== optionIndex;
             selectedVariants[groupIndex] = optionIndex;
-            if (option.img) {
-                const main = document.getElementById('qmMainImg');
-                if (main) {
-                    main.src = option.img;
-                    scrollQmMedia([...main.parentElement.parentElement.children].indexOf(main.parentElement));
-                }
+            // The photos of the chosen color / size take the place of the product photos.
+            // An option without photos gives the product photos back.
+            if (changed && optionPhotos(option).length) {
+                qmMediaGroup = groupIndex;
+                showQmMedia();
+            } else if (changed && qmMediaGroup === groupIndex) {
+                qmMediaGroup = null;
+                showQmMedia();
             }
             renderQmVariants();
             updateQmPriceDisplay();
@@ -4772,16 +4789,33 @@
             button.setAttribute('aria-label', muted ? 'Sound on' : 'Sound off');
         }
 
-        function renderQmMedia(prod, mainImage) {
+        // Which photos show above the description: the product's, or those of the chosen option
+        var qmMediaProduct; // var with no value: a product link can open the popup before this line runs
+        var qmMediaGroup;
+
+        function optionPhotos(option) {
+            return option ? [option.img, ...(option.gallery || [])].filter(Boolean) : [];
+        }
+
+        function showQmMedia() {
+            if (!qmMediaProduct) return;
+            const group = qmMediaGroup == null ? null : currentQmProduct.variants[qmMediaGroup];
+            const photos = group ? optionPhotos(group.options[selectedVariants[qmMediaGroup]]) : [];
+            renderQmMedia(qmMediaProduct.prod, qmMediaProduct.img, photos.length ? photos : null);
+        }
+
+        function renderQmMedia(prod, mainImage, optionPhotoList = null) {
             const track = document.getElementById('qmMediaTrack');
             const dots = document.getElementById('qmMediaDots');
             if (!track || !dots) return;
             stopQmVideo();
-            const gallery = readJsonAttribute(prod, 'data-gallery', []).filter(url => typeof url === 'string' && url);
-            const videoSrc = prod.getAttribute('data-video') || '';
+            const gallery = optionPhotoList
+                ? optionPhotoList.slice(1)
+                : readJsonAttribute(prod, 'data-gallery', []).filter(url => typeof url === 'string' && url);
+            if (optionPhotoList) mainImage = optionPhotoList[0];
+            const videoSrc = optionPhotoList ? '' : (prod.getAttribute('data-video') || '');
             const poster = prod.getAttribute('data-poster') || '';
             const slides = [];
-            startProductWatch(currentQmProduct.id);
             if (videoSrc) {
                 const slide = document.createElement('div');
                 slide.className = 'qm-slide qm-video-slide';

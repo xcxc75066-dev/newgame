@@ -1958,6 +1958,67 @@
             margin-top: 2px;
         }
 
+        /* sizes and other text choices: rounded pills; the chosen one is filled green */
+        .qm-variant-option:not(.has-image):not(.has-swatch) {
+            min-width: 58px;
+            min-height: 44px;
+            padding: 0 16px;
+            border-radius: 999px;
+            border: 1.5px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-dark);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        }
+        .qm-variant-option.active:not(.has-image):not(.has-swatch),
+        .qm-variant-option.active:not(.has-image):not(.has-swatch):hover {
+            background: var(--primary-green);
+            border: 1.5px solid var(--primary-green);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(10, 58, 42, 0.25);
+        }
+        .qm-variant-option:not(.has-image):not(.has-swatch):not(.active):hover {
+            background: var(--card-bg);
+            border: 1.5px solid var(--primary-green);
+            color: var(--text-dark);
+        }
+        .qm-variant-option.qm-variant-soldout:not(.has-image):not(.has-swatch) {
+            border-style: dashed;
+            text-decoration: line-through;
+        }
+        /* colors: a colored square with soft corners, the name under it */
+        .qm-variant-option.has-swatch {
+            min-width: unset;
+            min-height: unset;
+            padding: 5px 5px 0;
+            overflow: visible; /* the ring around the chosen color is not cut */
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+        .qm-swatch {
+            display: block;
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.14);
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .qm-variant-option.has-swatch.active .qm-swatch {
+            box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--primary-green);
+        }
+        .qm-variant-option.has-swatch.active .qm-option-name { color: var(--primary-green); }
+        .qm-variant-option.has-swatch.qm-variant-soldout .qm-swatch { opacity: 0.35; }
+        .qm-variant-option.has-swatch .qm-option-name { font-size: 0.82rem; }
+        /* dark mode: the chosen color / size is shown in gold (green is too dark there) */
+        body.dark-mode .qm-variant-selected,
+        body.dark-mode .qm-variant-option.has-swatch.active .qm-option-name { color: var(--gold-accent); }
+        body.dark-mode .qm-variant-option.has-swatch.active .qm-swatch { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--gold-accent); }
+
         .qm-variant-options {
             display: flex;
             gap: 16px 15px; /* rows 16px apart; side by side 15px (30% closer than 22px) */
@@ -4560,12 +4621,10 @@
                     .filter(item => item && Array.isArray(item.options))
                     .map(item => ({
                         name: String(item.name || item.label || item.type || 'Option'),
-                        photos: item.photos === true, // this group changes the photos (set in the CMS)
                         options: item.options.map(option => ({
                             name: String(typeof option === 'string' ? option : (option.name || option.label || 'Option')),
                             img: String(typeof option === 'string' ? '' : (option.img || option.image || '')),
-                            gallery: typeof option === 'object' && Array.isArray(option.gallery)
-                                ? option.gallery.filter(url => typeof url === 'string' && url) : [],
+                            hex: typeof option === 'object' && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(String(option.hex || '')) ? String(option.hex) : '',
                             soldOut: Boolean(typeof option === 'string' ? false : option.soldOut),
                             priceAdd: parsePriceAdjustment(typeof option === 'string' ? 0 : (option.priceAdd ?? option.priceDelta ?? option.extraPrice))
                         }))
@@ -4653,7 +4712,14 @@
                     if (selectedIndex === optionIndex) optionButton.classList.add('active');
                     if (option.soldOut) optionButton.classList.add('qm-variant-soldout');
 
-                    if (option.img) {
+                    if (option.hex && !option.img) {
+                        // a color: a small colored square with soft corners
+                        optionButton.classList.add('has-swatch');
+                        const swatch = document.createElement('span');
+                        swatch.className = 'qm-swatch';
+                        swatch.style.background = option.hex;
+                        optionButton.appendChild(swatch);
+                    } else if (option.img) {
                         optionButton.classList.add('has-image');
                         const image = document.createElement('img');
                         image.src = option.img;
@@ -4724,7 +4790,6 @@
             selectedVariants = {};
             currentQty = 1;
 
-            qmMediaGroup = null; // the product's own photos first
             currentQmProduct.variants.forEach((group, groupIndex) => {
                 const firstAvailable = group.options.findIndex(option => !option.soldOut);
                 selectedVariants[groupIndex] = firstAvailable >= 0 ? firstAvailable : 0;
@@ -4752,19 +4817,7 @@
             const option = group && group.options[optionIndex];
             if (!option || option.soldOut) return;
 
-            const changed = selectedVariants[groupIndex] !== optionIndex;
-            selectedVariants[groupIndex] = optionIndex;
-            // Only the group chosen in the CMS (the first one if none) changes the photos above
-            // the description: its option's photos, or the product photos if it has none.
-            // Tapping the other groups (e.g. sizes) leaves the photos as they are.
-            if (groupIndex === qmPhotoGroup()) {
-                const next = optionPhotos(option).length ? groupIndex : null;
-                // also when the first option, already chosen, is tapped while the product photos show
-                if (changed || next !== qmMediaGroup) {
-                    qmMediaGroup = next;
-                    showQmMedia();
-                }
-            }
+            selectedVariants[groupIndex] = optionIndex; // the photos above the description stay as they are
             renderQmVariants();
             updateQmPriceDisplay();
         }
@@ -4846,22 +4899,9 @@
 
         // Which photos show above the description: the product's, or those of the chosen option
         var qmMediaProduct; // var with no value: a product link can open the popup before this line runs
-        var qmMediaGroup;
-
-        function qmPhotoGroup() {
-            const marked = currentQmProduct.variants.findIndex(group => group.photos);
-            return marked >= 0 ? marked : 0;
-        }
-
-        function optionPhotos(option) {
-            return option ? [option.img, ...(option.gallery || [])].filter(Boolean) : [];
-        }
 
         function showQmMedia() {
-            if (!qmMediaProduct) return;
-            const group = qmMediaGroup == null ? null : currentQmProduct.variants[qmMediaGroup];
-            const photos = group ? optionPhotos(group.options[selectedVariants[qmMediaGroup]]) : [];
-            renderQmMedia(qmMediaProduct.prod, qmMediaProduct.img, photos.length ? photos : null);
+            if (qmMediaProduct) renderQmMedia(qmMediaProduct.prod, qmMediaProduct.img);
         }
 
         function renderQmMedia(prod, mainImage, optionPhotoList = null) {

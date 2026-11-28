@@ -347,13 +347,6 @@ input[type=date] { color-scheme: inherit; }
 .option-row .option-extra { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; }
 .option-row .option-extra input { flex: 1; min-height: 40px; font-size: 13px; }
 .option-row .option-extra img { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; background: var(--surface); }
-.group-box .group-photos { display: flex; white-space: normal; margin: 6px 0 2px; color: var(--gold, #C5A059); font-weight: 700; }
-.group-box .group-photos input { width: 20px; height: 20px; min-height: 0; flex: none; padding: 0; margin: 0; }
-.option-row .option-photos { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.option-row .option-photo { position: relative; }
-.option-row .option-photo img { width: 48px; height: 48px; border-radius: 10px; object-fit: cover; background: var(--surface); display: block; }
-.option-row .option-photo button { position: absolute; top: -6px; inset-inline-end: -6px; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--danger, #dc2626); color: #fff; cursor: pointer; }
-.option-row .option-photo button svg { width: 12px; height: 12px; }
 .mini-check { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; color: var(--muted); }
 .mini-check input, .pick-row input { accent-color: var(--primary); width: 20px; height: 20px; }
 .badge-row { display: grid; grid-template-columns: 1fr 1fr 44px; gap: 6px; align-items: center; margin-bottom: 10px; }
@@ -474,3 +467,20 @@ input[type=date] { color-scheme: inherit; }
 .banner-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .banner-item img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 12px; background: var(--inset); }
 #tab-banners .btn.block { margin-top: 10px; }
+
+/* ready sizes and colors: one tap adds or removes */
+.quick-pick { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; }
+.quick-row { display: flex; flex-direction: column; gap: 5px; }
+.quick-row small, .quick-pick .hint { color: var(--muted); font-size: 12px; }
+.quick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick-chip { min-width: 44px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1.5px solid var(--line-strong); background: transparent; color: var(--text); font-weight: 700; font-size: 13px; cursor: pointer; }
+.quick-chip.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary, #0b241a); }
+.color-chip { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 54px; padding: 4px 0; border: 0; background: transparent; color: var(--text); cursor: pointer; }
+.color-chip span { width: 34px; height: 34px; border-radius: 9px; border: 1px solid rgba(127, 127, 127, 0.45); display: block; }
+.color-chip small { font-size: 11px; color: var(--muted); }
+.color-chip.on span { outline: 2.5px solid var(--primary); outline-offset: 2px; }
+.color-chip.on small { color: var(--text); font-weight: 700; }
+.custom-color { display: flex; gap: 6px; align-items: center; }
+.custom-color input[type="color"], .option-row .option-extra input.option-hex { width: 40px; min-width: 40px; height: 40px; padding: 2px; border-radius: 10px; border: 1px solid var(--line-strong); background: transparent; flex: none; cursor: pointer; }
+.custom-color input[type="text"] { flex: 1; min-width: 0; min-height: 40px; font-size: 13px; }
+.custom-color input[dir="ltr"] { max-width: 96px; }

@@ -118,7 +118,7 @@
     'Free delivery across Morocco': ['توصيل مجاني في جميع أنحاء المغرب', 'Livraison gratuite partout au Maroc'],
     'Order today, receive it tomorrow': ['اطلب اليوم، واستلم غداً', "Commandez aujourd'hui, recevez demain"],
     'Cash on delivery': ['الدفع عند الاستلام', 'Paiement à la livraison'],
-    'Pay on delivery, free shipping to every city': ['الدفع عند الاستلام، والتوصيل مجاني لجميع المدن', 'Paiement à la livraison, livraison gratuite dans toutes les villes'],
+    'Check your product with the courier before you pay': ['تفقّد منتوجك مع عامل التوصيل قبل الدفع', 'Vérifiez votre produit avec le livreur avant de payer'],
     '15-day warranty': ['ضمان 15 يوماً', 'Garantie 15 jours'],
     'Contact Us': ['اتصل بنا', 'Contactez-nous'],
     'A question about a product or your order? Write to us on WhatsApp, we reply quickly.': ['هل لديك سؤال عن منتج أو عن طلبك؟ راسلنا عبر واتساب، نرد بسرعة.', 'Une question sur un produit ou votre commande ? Écrivez-nous sur WhatsApp, nous répondons vite.'],

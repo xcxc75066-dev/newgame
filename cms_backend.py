@@ -71,7 +71,6 @@ UPLOAD_NAME_PATTERN = re.compile(r"^[a-f0-9]{24}\.(?:jpg|png|webp|mp4)$")
 VIDEO_SRC_PATTERN = re.compile(r"^/uploads/[a-f0-9]{24}\.mp4$")
 VIDEO_POSTER_PATTERN = re.compile(r"^/uploads/[a-f0-9]{24}\.jpg$")
 MAX_GALLERY_IMAGES = 8
-MAX_OPTION_IMAGES = 6  # extra photos for one color / size
 MAX_VIDEO_UPLOAD_BYTES = 400 * 1024 * 1024
 MAX_VIDEO_SECONDS = 60
 HISTORY_NAME_PATTERN = re.compile(r"^products-\d{8}T\d{12}Z\.json$")
@@ -367,23 +366,13 @@ def clean_product(
                 "soldOut": bool(option.get("soldOut")),
                 "priceAdd": price_add,
             }
-            # More photos of this option: they replace the product photos when it is chosen
-            option_gallery = option.get("gallery") or []
-            if not isinstance(option_gallery, list) or len(option_gallery) > MAX_OPTION_IMAGES:
-                raise CmsError(400, f"{label}: الحد الأقصى {MAX_OPTION_IMAGES} صور إضافية لـ «{option_name}».")
-            option_gallery = [
-                _image_url(url, f"{label} - صورة إضافية لـ «{option_name}»", required=True) for url in option_gallery
-            ]
-            if option_gallery:
-                clean_option["gallery"] = option_gallery
+            # a color option can have its colored square (#RRGGBB)
+            if option.get("hex"):
+                clean_option["hex"] = _color(option.get("hex"), f"{label} - لون «{option_name}»", "#000000")
             clean_options.append(clean_option)
         if all(option["soldOut"] for option in clean_options):
             raise CmsError(400, f"{label}: كل خيارات «{group_name}» نافدة؛ اترك خياراً واحداً متوفراً أو أخفِ المنتج.")
-        clean_group = {"name": group_name, "options": clean_options}
-        # ⭐ the one group whose options change the product photos (the first group if none)
-        if group.get("photos") is True and not any(g.get("photos") for g in clean_groups):
-            clean_group["photos"] = True
-        clean_groups.append(clean_group)
+        clean_groups.append({"name": group_name, "options": clean_options})
 
     gallery = raw.get("gallery") or []
     if not isinstance(gallery, list) or len(gallery) > MAX_GALLERY_IMAGES:

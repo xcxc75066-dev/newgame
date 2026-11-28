@@ -539,7 +539,9 @@
         if (existing) return;
         const menu = h('div', { class: 'menu-pop', role: 'menu' },
           h('button', { type: 'button', role: 'menuitem', icon: 'edit', onclick: () => { closeMenus(); open(); } }, 'تعديل'),
-          h('button', { type: 'button', role: 'menuitem', icon: 'copy', onclick: () => { closeMenus(); duplicateProduct(list, index); } }, 'نسخ'),
+          h('button', { type: 'button', role: 'menuitem', icon: 'copy', onclick: () => { closeMenus(); duplicateProduct(list, index); } }, 'نسخ المنتوج'),
+          h('button', { type: 'button', role: 'menuitem', icon: 'external', disabled: !product['pro-id123'],
+            onclick: () => { closeMenus(); copyProductLink(product); } }, 'نسخ الرابط'),
           h('button', { type: 'button', role: 'menuitem', icon: 'up', disabled: index === 0, onclick: () => { closeMenus(); moveProduct(list, index, -1); } }, 'طلّعو لفوق'),
           h('button', { type: 'button', role: 'menuitem', icon: 'down', disabled: index === size - 1, onclick: () => { closeMenus(); moveProduct(list, index, 1); } }, 'نزّلو لتحت'),
           h('button', { type: 'button', role: 'menuitem', class: 'danger', icon: 'trash', onclick: () => { closeMenus(); deleteProduct(list, index); } }, 'حذف')
@@ -569,6 +571,11 @@
             title: product.hidden ? 'إظهار فالمتجر' : 'إخفاء من المتجر', 'aria-label': product.hidden ? 'إظهار فالمتجر' : 'إخفاء من المتجر',
             onclick: () => toggleHidden(list, index)
           }),
+          // 📄 copy: a hidden copy of this product opens in the editor
+          h('button', {
+            class: 'icon-btn small', type: 'button', icon: 'copy', title: 'نسخ المنتوج', 'aria-label': 'نسخ المنتوج',
+            onclick: () => duplicateProduct(list, index)
+          }),
           menuButton))
     );
     return card;
@@ -581,6 +588,13 @@
     const product = lists[list][index];
     product.hidden = !product.hidden;
     await saveLists(lists, product.hidden ? 'تم إخفاء المنتج من المتجر' : 'المنتج ظاهر دابا فالمتجر');
+  }
+
+  // the product's shop link (for an ad or WhatsApp)
+  async function copyProductLink(product) {
+    const url = `${shopBase()}/p/${encodeURIComponent(product['pro-id123'])}`;
+    try { await navigator.clipboard.writeText(url); toast('تنسخ الرابط ✓', 'success'); }
+    catch (_) { prompt('هاهو الرابط، نسخو:', url); }
   }
 
   async function duplicateProduct(list, index) {
@@ -623,15 +637,12 @@
 
   function presetGroup(kind) {
     if (kind === 'size') {
-      return { name: 'Size', options: [
-        { name: '50 ml', img: '', soldOut: false, priceAdd: 0 },
-        { name: '100 ml', img: '', soldOut: false, priceAdd: 100 }
-      ] };
+      return { name: 'Size', options: ['S', 'M', 'L', 'XL'].map((name) => ({ name, img: '', soldOut: false, priceAdd: 0 })) };
     }
     if (kind === 'color') {
       return { name: 'Color', options: [
-        { name: 'Black', img: '', soldOut: false, priceAdd: 0 },
-        { name: 'Gold', img: '', soldOut: false, priceAdd: 0 }
+        { name: 'Black', hex: '#111111', img: '', soldOut: false, priceAdd: 0 },
+        { name: 'White', hex: '#FFFFFF', img: '', soldOut: false, priceAdd: 0 }
       ] };
     }
     return { name: '', options: [{ name: '', img: '', soldOut: false, priceAdd: 0 }] };
@@ -642,7 +653,7 @@
     const draft = isNew ? newProduct() : clone(state.lists[list][index]);
     if (isNew) draft.id = 'AP' + Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
     draft.colors = draft.colors || [];
-    draft.colors.forEach((g) => (g.options || []).forEach((o) => { delete o.default; })); // old per-option setting
+    draft.colors.forEach((g) => { delete g.photos; (g.options || []).forEach((o) => { delete o.default; delete o.gallery; }); }); // old photo settings
     draft.badges = draft.badges || [];
     draft.gallery = Array.isArray(draft.gallery) ? draft.gallery : [];
     draft.video = draft.video && draft.video.src ? draft.video : null;
@@ -808,6 +819,79 @@
     renderPreview();
   }
 
+  // Ready sizes and colors, chosen with one tap
+  const SIZE_LISTS = [
+    ['👕 ملابس', ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL']],
+    ['👟 حذاء', ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']]
+  ];
+  const COLOR_LIST = [
+    ['Black', '#111111'], ['White', '#FFFFFF'], ['Grey', '#9CA3AF'], ['Beige', '#D9C7A7'],
+    ['Brown', '#7B4A2A'], ['Camel', '#C19A6B'], ['Red', '#D62828'], ['Pink', '#F48FB1'],
+    ['Orange', '#F97316'], ['Yellow', '#FACC15'], ['Green', '#2E7D32'], ['Olive', '#6B7B3A'],
+    ['Blue', '#2563EB'], ['Navy', '#1E2A5A'], ['Purple', '#7C3AED'], ['Gold', '#C5A059'], ['Silver', '#C0C0C0']
+  ];
+  const isSizeGroup = (name) => /^(size|sizes|taille|pointure|الحجم|المقاس|القياس|المقاسات|الأحجام)$/i.test(String(name || '').trim());
+  const isColorGroup = (name) => /^(colou?rs?|couleurs?|اللون|الألوان|الالوان)$/i.test(String(name || '').trim());
+  const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  const newOption = (name, hex) => ({ name, ...(hex ? { hex } : {}), img: '', soldOut: false, priceAdd: 0 });
+
+  function toggleOption(group, name, hex) {
+    const at = group.options.findIndex((o) => sameName(o.name, name));
+    if (at >= 0) {
+      if (group.options.length === 1) { toast('خاص يبقى خيار واحد على الأقل.', 'error'); return; }
+      group.options.splice(at, 1);
+    } else {
+      const blank = group.options.findIndex((o) => !String(o.name || '').trim());
+      if (blank >= 0) group.options.splice(blank, 1, newOption(name, hex)); else group.options.push(newOption(name, hex));
+      if (group.options.length > 50) { group.options.pop(); toast('الحد الأقصى 50 خيار.', 'error'); return; }
+    }
+    markDirty(); renderGroups();
+  }
+
+  function sizePicker(group) {
+    const has = (name) => group.options.some((o) => sameName(o.name, name));
+    return h('div', { class: 'quick-pick' },
+      ...SIZE_LISTS.map(([label, names]) => h('div', { class: 'quick-row' },
+        h('small', { text: label }),
+        h('div', { class: 'quick-chips' }, ...names.map((name) => h('button', {
+          type: 'button', class: `quick-chip${has(name) ? ' on' : ''}`, 'aria-pressed': String(has(name)),
+          onclick: () => {
+            toggleOption(group, name);
+            // keep the ready sizes in their natural order (S before M…)
+            const order = SIZE_LISTS.flatMap(([, list]) => list);
+            const rank = (o) => { const i = order.findIndex((n) => sameName(n, o.name)); return i < 0 ? 999 : i; };
+            group.options.sort((a, b) => rank(a) - rank(b));
+            renderGroups();
+          }
+        }, name))))),
+      h('small', { class: 'hint', text: 'ضغط على الحجم باش تزيدو ولا تحيدو' }));
+  }
+
+  function colorPicker(group) {
+    const has = (name) => group.options.some((o) => sameName(o.name, name));
+    const hexInput = h('input', { type: 'text', dir: 'ltr', placeholder: '#C5A059', maxlength: 7, 'aria-label': 'كود اللون (hex)' });
+    const nameInput = h('input', { type: 'text', dir: 'auto', placeholder: 'سمية اللون', maxlength: 60, 'aria-label': 'سمية اللون' });
+    const swatch = h('input', { type: 'color', value: '#C5A059', 'aria-label': 'اختار اللون',
+      oninput: (e) => { hexInput.value = e.target.value.toUpperCase(); } });
+    hexInput.addEventListener('input', () => { if (/^#[0-9a-f]{6}$/i.test(hexInput.value.trim())) swatch.value = hexInput.value.trim(); });
+    const addCustom = () => {
+      const hex = (hexInput.value.trim() || swatch.value).toUpperCase();
+      const name = nameInput.value.trim();
+      if (!/^#[0-9A-F]{6}$/.test(hex)) { toast('كود اللون خاصو يكون بحال #C5A059', 'error'); return; }
+      if (!name) { toast('كتب سمية اللون', 'error'); nameInput.focus(); return; }
+      if (has(name)) { toast('هاد اللون ديجا كاين', 'error'); return; }
+      toggleOption(group, name, hex);
+    };
+    return h('div', { class: 'quick-pick' },
+      h('div', { class: 'quick-chips colors' }, ...COLOR_LIST.map(([name, hex]) => h('button', {
+        type: 'button', class: `color-chip${has(name) ? ' on' : ''}`, title: name, 'aria-label': name, 'aria-pressed': String(has(name)),
+        onclick: () => toggleOption(group, name, hex)
+      }, h('span', { style: `background:${hex}` }), h('small', { text: name })))),
+      h('div', { class: 'custom-color' }, swatch, hexInput, nameInput,
+        h('button', { class: 'btn ghost small', type: 'button', icon: 'plus', onclick: addCustom }, 'زيد')),
+      h('small', { class: 'hint', text: 'ضغط على اللون باش تزيدو ولا تحيدو، ولا زيد لون بالكود ديالو (hex)' }));
+  }
+
   // Option groups ("colors" in the shop's JSON)
   function renderGroups() {
     const draft = state.editing.draft;
@@ -823,12 +907,9 @@
         h('button', { class: 'icon-btn danger', type: 'button', 'aria-label': 'حذف المجموعة', title: 'حذف المجموعة', icon: 'trash',
           onclick: () => { draft.colors.splice(gi, 1); markDirty(); renderGroups(); } })
       ),
-      // ⭐ default: only this group changes the photos above the description (the first one if none chosen)
-      h('label', { class: 'mini-check group-photos', title: 'غير الخيارات ديال هاد المجموعة كيبدلو الصورة اللي فوق الوصف' },
-        h('input', { type: 'radio', name: 'photos-group',
-          checked: draft.colors.some((g) => g.photos) ? !!group.photos : gi === 0,
-          onchange: () => { draft.colors.forEach((g) => { delete g.photos; }); group.photos = true; markDirty(); renderGroups(); } }),
-        '⭐ افتراضي: هادي اللي كتبدل الصور'),
+      // quick choices: tap a size / a color to add it, tap again to remove it
+      isSizeGroup(group.name) ? sizePicker(group) : null,
+      isColorGroup(group.name) ? colorPicker(group) : null,
       ...group.options.map((option, oi) => h('div', { class: 'option-row' },
         h('input', { value: option.name, dir: 'auto', placeholder: 'الخيار (مثال: 50 ml)', 'aria-label': 'اسم الخيار', maxlength: 60,
           oninput: (e) => { option.name = e.target.value; } }),
@@ -841,21 +922,15 @@
           h('label', { class: 'mini-check' },
             h('input', { type: 'checkbox', checked: !!option.soldOut, onchange: (e) => { option.soldOut = e.target.checked; } }),
             'نفد'),
+          // a color option: its little colored square (tap to change it)
+          option.hex ? h('input', { type: 'color', class: 'option-hex', value: option.hex.length === 7 ? option.hex : '#000000', title: 'بدل اللون', 'aria-label': 'بدل اللون',
+            oninput: (e) => { option.hex = e.target.value.toUpperCase(); markDirty(); } }) : null,
           h('img', { src: option.img || PLACEHOLDER, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
           h('input', { value: option.img || '', placeholder: 'صورة الخيار (اختياري)', dir: 'ltr', 'aria-label': 'رابط صورة الخيار',
             oninput: (e) => { option.img = e.target.value.trim(); } }),
           h('button', { class: 'icon-btn', type: 'button', title: 'رفع صورة للخيار', 'aria-label': 'رفع صورة للخيار', icon: 'camera',
             onclick: () => pickImage((url) => { option.img = url; markDirty(); renderGroups(); }) })
-        ),
-        // more photos of this option: they take the place of the product photos when it is chosen
-        option.img ? h('div', { class: 'option-photos' },
-          ...(option.gallery || []).map((url, pi) => h('div', { class: 'option-photo' },
-            h('img', { src: url, alt: '', onerror: (e) => { e.target.src = PLACEHOLDER; } }),
-            h('button', { type: 'button', 'aria-label': 'حيد الصورة', title: 'حيد الصورة', icon: 'close',
-              onclick: () => { option.gallery.splice(pi, 1); if (!option.gallery.length) delete option.gallery; markDirty(); renderGroups(); } }))),
-          (option.gallery || []).length < 6 ? h('button', { class: 'btn ghost small', type: 'button', icon: 'plus',
-            onclick: () => pickImage((url) => { (option.gallery = option.gallery || []).push(url); markDirty(); renderGroups(); }) }, 'صور خرين') : null
-        ) : null
+        )
       )),
       h('button', { class: 'btn ghost small', type: 'button', icon: 'plus',
         onclick: () => { group.options.push({ name: '', img: '', soldOut: false, priceAdd: 0 }); markDirty(); renderGroups(); } }, 'زيد خيار')
